@@ -24,7 +24,7 @@
           "date": "2026-06-10",
           "localizedDescription": "Fixed false-positive \"You appear to be offline\" on pull-to-refresh, improved first-sync responsiveness with a loading state, and added pull-to-refresh to the Library tab.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v0.1.1/PaperQueue-unsigned.ipa",
-          "size": 1468006,
+          "size": 1452742,
           "minOSVersion": "17.0"
         }
       ],
