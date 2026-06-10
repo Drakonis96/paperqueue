@@ -1,0 +1,92 @@
+name: PaperQueue
+
+options:
+  bundleIdPrefix: com.paperqueue
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_EMIT_LOC_STRINGS: NO
+
+targets:
+  PaperQueue:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: PaperQueue
+      - path: Shared
+    dependencies:
+      - target: PaperQueueWidget
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.paperqueue.app
+        PRODUCT_NAME: PaperQueue
+        ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: PaperQueue/Info.plist
+      properties:
+        CFBundleDisplayName: PaperQueue
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.paperqueue.app
+            CFBundleURLSchemes: [paperqueue]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: PaperQueue/PaperQueue.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.paperqueue.shared
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-only: true
+
+  PaperQueueWidget:
+    type: app-extension
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: PaperQueueWidget
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.paperqueue.app.widget
+        PRODUCT_NAME: PaperQueueWidget
+    info:
+      path: PaperQueueWidget/Info.plist
+      properties:
+        CFBundleDisplayName: PaperQueue
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: PaperQueueWidget/PaperQueueWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.paperqueue.shared
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+
+schemes:
+  PaperQueue:
+    build:
+      targets:
+        PaperQueue: all
+    run:
+      config: Debug
+    archive:
+      config: Release

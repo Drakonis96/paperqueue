@@ -1,0 +1,38 @@
+{
+  "name": "PaperQueue",
+  "identifier": "com.paperqueue.altstore",
+  "subtitle": "A focused reading queue for your Zotero library.",
+  "description": "AltStore source for PaperQueue — a native reading-queue companion for your Zotero library.",
+  "iconURL": "https://raw.githubusercontent.com/Drakonis96/paperqueue/main/logo.png",
+  "website": "https://github.com/Drakonis96/paperqueue",
+  "sourceURL": "https://raw.githubusercontent.com/Drakonis96/paperqueue/main/altstore-source.json",
+  "apps": [
+    {
+      "name": "PaperQueue",
+      "bundleIdentifier": "com.paperqueue.app",
+      "developerName": "Drakonis96",
+      "subtitle": "Read more of your Zotero library, with less friction.",
+      "localizedDescription": "PaperQueue turns your Zotero library into a focused, curated reading queue. Build a queue, mark papers as read, reorder by priority, search and add by DOI, and browse collections — all synced through Zotero tags so it works across your devices. On iPhone/iPad it's a companion for managing your queue; read the PDFs on your Mac in Zotero.\n\nThis build is unsigned — install it with AltStore/SideStore, which re-signs it with your own Apple ID.",
+      "iconURL": "https://raw.githubusercontent.com/Drakonis96/paperqueue/main/logo.png",
+      "tintColor": "0A84FF",
+      "category": "productivity",
+      "screenshotURLs": [],
+      "versions": [
+        {
+          "version": "0.1.0",
+          "buildVersion": "1",
+          "date": "2026-06-10",
+          "localizedDescription": "First public build: curated reading queue via Zotero tags, library search & filters, collection browsing, add-by-DOI, history and stats.",
+          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v0.1.0/PaperQueue-unsigned.ipa",
+          "size": 1429501,
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      }
+    }
+  ],
+  "news": []
+}

@@ -1,0 +1,35 @@
+# ---- macOS ----
+.DS_Store
+
+# ---- Xcode / Swift ----
+# The .xcodeproj is generated from app/project.yml by XcodeGen — don't commit it.
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+.swiftpm/
+
+# ---- Node / server ----
+node_modules/
+dist/
+
+# ---- Local databases ----
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# ---- Secrets / environment ----
+.env
+.env.local
+*.p12
+*.mobileprovision
+
+# ---- Build artifacts (published via GitHub Releases, not committed) ----
+*.ipa
+*.dmg
+
+# ---- Logs ----
+*.log
