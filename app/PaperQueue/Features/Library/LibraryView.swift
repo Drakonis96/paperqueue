@@ -60,7 +60,9 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if papers.isEmpty {
+                if store.isSyncing && papers.isEmpty {
+                    loadingLibrary
+                } else if papers.isEmpty {
                     emptyLibrary
                 } else {
                     list
@@ -69,6 +71,7 @@ struct LibraryView: View {
             .navigationTitle("Library")
             .searchable(text: $search, prompt: "Search title, author, journal")
             .toolbar { toolbarContent }
+            .refreshable { await store.syncLibrary() }
             .navigationDestination(for: QueueRoute.self) { route in
                 switch route {
                 case let .detail(key): PaperDetailView(paperKey: key)
@@ -169,6 +172,14 @@ struct LibraryView: View {
         } actions: {
             Button("Sync Library") { Task { await store.syncLibrary() } }
                 .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var loadingLibrary: some View {
+        ContentUnavailableView {
+            Label("Loading library…", systemImage: "arrow.triangle.2.circlepath")
+        } description: {
+            Text(store.syncSummary ?? "Fetching your Zotero items…")
         }
     }
 

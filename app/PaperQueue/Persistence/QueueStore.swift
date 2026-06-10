@@ -68,7 +68,12 @@ final class QueueStore: ObservableObject {
             return
         }
         isSyncing = true
-        defer { isSyncing = false }
+        lastError = nil
+        syncSummary = "Fetching library…"
+        defer {
+            isSyncing = false
+            updateWidget()
+        }
         await flushOutbox()
 
         do {
@@ -82,6 +87,13 @@ final class QueueStore: ObservableObject {
             let pending = (try? context.fetchCount(FetchDescriptor<CachedPaper>(
                 predicate: #Predicate { $0.isPending }))) ?? 0
             syncSummary = "\(total) items in library · \(pending) in your queue."
+        } catch is CancellationError {
+            // Pull-to-refresh dismissed before the call finished — ignore.
+            isOffline = false
+            lastError = nil
+        } catch let error as APIError where error.isCancelled {
+            isOffline = false
+            lastError = nil
         } catch let error as APIError where error.isOffline {
             isOffline = true
             lastError = "You appear to be offline."
@@ -89,7 +101,6 @@ final class QueueStore: ObservableObject {
             lastError = (error as? APIError)?.errorDescription
                 ?? error.localizedDescription
         }
-        updateWidget()
     }
 
     /// Reconciles fetched items into the cache.

@@ -27,7 +27,26 @@ enum APIError: LocalizedError {
     var isOffline: Bool {
         if case let .transport(error) = self {
             let nsError = error as NSError
+            guard nsError.domain == NSURLErrorDomain else { return false }
+            let offlineCodes: [Int] = [
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorInternationalRoamingOff,
+                NSURLErrorCallIsActive,
+                NSURLErrorDataNotAllowed,
+                NSURLErrorNetworkConnectionLost,
+            ]
+            return offlineCodes.contains(nsError.code)
+        }
+        return false
+    }
+
+    /// True when the request was explicitly cancelled (e.g. pull-to-refresh
+    /// dismissed before the network call finished).
+    var isCancelled: Bool {
+        if case let .transport(error) = self {
+            let nsError = error as NSError
             return nsError.domain == NSURLErrorDomain
+                && nsError.code == NSURLErrorCancelled
         }
         return false
     }
