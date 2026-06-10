@@ -19,12 +19,12 @@
       "screenshotURLs": [],
       "versions": [
         {
-          "version": "0.1.0",
-          "buildVersion": "1",
+          "version": "0.1.1",
+          "buildVersion": "2",
           "date": "2026-06-10",
-          "localizedDescription": "First public build: curated reading queue via Zotero tags, library search & filters, collection browsing, add-by-DOI, history and stats.",
-          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v0.1.0/PaperQueue-unsigned.ipa",
-          "size": 1429501,
+          "localizedDescription": "Fixed false-positive \"You appear to be offline\" on pull-to-refresh, improved first-sync responsiveness with a loading state, and added pull-to-refresh to the Library tab.",
+          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v0.1.1/PaperQueue-unsigned.ipa",
+          "size": 1468006,
           "minOSVersion": "17.0"
         }
       ],
