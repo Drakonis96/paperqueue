@@ -14,6 +14,21 @@ enum Theme {
         default: return .secondary
         }
     }
+
+    /// A gentle spring used for subtle state-change animations across the app.
+    static let subtleSpring = Animation.spring(response: 0.35, dampingFraction: 0.82)
+}
+
+/// A button style that gently scales and dims while pressed, so taps on the
+/// small quick-action controls feel responsive without being flashy.
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7),
+                       value: configuration.isPressed)
+    }
 }
 
 extension Int {

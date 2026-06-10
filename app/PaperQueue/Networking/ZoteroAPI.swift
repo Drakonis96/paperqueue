@@ -153,8 +153,11 @@ struct ZoteroAPI {
 
     // MARK: Reads
 
-    /// Top-level items only (excludes attachments/notes/annotations) — fast.
-    /// `onProgress` reports a 0…1 fraction as pages stream in (for a progress bar).
+    /// Every top-level library item — books, book sections, theses, reports,
+    /// conference papers, journal articles, etc. (attachments/notes/annotations
+    /// are excluded downstream). Pages are fetched concurrently so a large
+    /// library loads fast. `onProgress` reports a 0…1 fraction (for a progress
+    /// bar).
     func topItems(
         onProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> [ZoteroItem] {
@@ -241,45 +244,88 @@ struct ZoteroAPI {
 
     // MARK: - Internals
 
+    /// Largest page Zotero serves in one request.
+    private static let pageLimit = 100
+    /// How many page requests to keep in flight at once. Zotero tolerates a
+    /// handful of concurrent reads; this is the sweet spot between speed and
+    /// staying well under its rate limits.
+    private static let maxConcurrentPages = 5
+
+    /// Fetches a paginated item list. The first page is fetched to learn the
+    /// total count, then the remaining pages are requested concurrently (in
+    /// bounded batches) instead of one-at-a-time — a big speedup for large
+    /// libraries. Results are returned in their original order.
     private func paginatedItems(
         path: String, onProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> [ZoteroItem] {
-        var all: [ZoteroItem] = []
-        let limit = 100
-        var start = 0
-        let decoder = JSONDecoder()
+        let limit = Self.pageLimit
 
-        while true {
-            var comps = URLComponents(
-                url: libURL(path), resolvingAgainstBaseURL: false)!
-            comps.queryItems = [
-                URLQueryItem(name: "include", value: "data"),
-                URLQueryItem(name: "limit", value: "\(limit)"),
-                URLQueryItem(name: "start", value: "\(start)"),
-            ]
-            let (data, response) = try await Self.send(authorized(comps.url!))
-            guard response.statusCode == 200 else {
-                throw APIError.server(status: response.statusCode, message: nil)
-            }
-            let batch: [ZoteroItem]
-            do {
-                batch = try decoder.decode([ZoteroItem].self, from: data)
-            } catch {
-                throw APIError.decoding(error)
-            }
-            all.append(contentsOf: batch)
+        // First page also tells us how many items there are in total.
+        let (firstBatch, total) = try await fetchPage(path: path, start: 0, limit: limit)
+        var loaded = firstBatch.count
+        onProgress?(total > 0 ? min(Double(loaded) / Double(total), 1) : 1)
 
-            let total = Int(
-                response.value(forHTTPHeaderField: "Total-Results") ?? "")
-                ?? all.count
-            if let onProgress, total > 0 {
-                onProgress(min(Double(all.count) / Double(total), 1))
-            }
-            start += limit
-            if start >= total || batch.isEmpty { break }
+        if loaded >= total || firstBatch.isEmpty {
+            onProgress?(1)
+            return firstBatch
         }
+
+        // Remaining page offsets, fetched concurrently in bounded windows.
+        let starts = stride(from: limit, to: total, by: limit).map { $0 }
+        var pages: [Int: [ZoteroItem]] = [0: firstBatch]
+
+        var index = 0
+        while index < starts.count {
+            let window = starts[index..<min(index + Self.maxConcurrentPages, starts.count)]
+            try await withThrowingTaskGroup(of: (Int, [ZoteroItem]).self) { group in
+                for start in window {
+                    group.addTask {
+                        let (batch, _) = try await self.fetchPage(
+                            path: path, start: start, limit: limit)
+                        return (start, batch)
+                    }
+                }
+                for try await (start, batch) in group {
+                    pages[start] = batch
+                    loaded += batch.count
+                    if let onProgress, total > 0 {
+                        onProgress(min(Double(loaded) / Double(total), 1))
+                    }
+                }
+            }
+            index += Self.maxConcurrentPages
+        }
+
         onProgress?(1)
-        return all
+        return pages.keys.sorted().flatMap { pages[$0] ?? [] }
+    }
+
+    /// Fetches a single page of items and reports the library's total count
+    /// (from the `Total-Results` header).
+    private func fetchPage(
+        path: String, start: Int, limit: Int
+    ) async throws -> (items: [ZoteroItem], total: Int) {
+        var comps = URLComponents(
+            url: libURL(path), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [
+            URLQueryItem(name: "include", value: "data"),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "start", value: "\(start)"),
+        ]
+        let (data, response) = try await Self.send(authorized(comps.url!))
+        guard response.statusCode == 200 else {
+            throw APIError.server(status: response.statusCode, message: nil)
+        }
+        let batch: [ZoteroItem]
+        do {
+            batch = try JSONDecoder().decode([ZoteroItem].self, from: data)
+        } catch {
+            throw APIError.decoding(error)
+        }
+        let total = Int(
+            response.value(forHTTPHeaderField: "Total-Results") ?? "")
+            ?? (start + batch.count)
+        return (batch, total)
     }
 
     private func collections(path: String) async throws -> [ZoteroCollection] {

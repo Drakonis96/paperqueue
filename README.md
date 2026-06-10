@@ -21,9 +21,13 @@ of *"what do I read today?" → "read it" → "next."* PaperQueue is built for t
   Swipe to mark read, postpone, skip, or remove. Drag to reorder. Create
   **multiple named queues** (e.g. *To read*, *Teaching*, *Reviews*) and switch
   between them; the Add button targets the **Default** queue unless you pick one.
-- **Library** — browse your whole library with **search** and rich **filters**:
-  status (All / In Queue / Unread / Read), collection, and searchable
-  **author / tag / publication-year** filters. Queued papers show a green check.
+- **Library** — browse your **whole bibliography** (books, chapters, theses,
+  reports, conference papers — every Zotero item type, not just journal
+  articles), with **search**, **sorting** (recently added, title, author or
+  year), and rich **filters**: status (All / In Queue / Unread / Read),
+  collection, and searchable **author / tag / publication-year** filters. The
+  library is fetched in parallel so large collections load fast. Queued papers
+  show a green check.
 - **Collections** — navigate collections and subcollections and add papers to
   the queue from there.
 - **Live sync progress** — a progress bar while your library is fetched.

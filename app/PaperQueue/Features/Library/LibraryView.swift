@@ -18,12 +18,78 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// How the Library list is ordered. Persisted across launches.
+enum LibrarySort: String, CaseIterable, Identifiable {
+    case recentlyAdded = "Recently added"
+    case oldestAdded = "Oldest added"
+    case titleAZ = "Title (A–Z)"
+    case authorAZ = "Author (A–Z)"
+    case yearNewest = "Year (newest)"
+    case yearOldest = "Year (oldest)"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .recentlyAdded: return "clock.arrow.circlepath"
+        case .oldestAdded: return "clock"
+        case .titleAZ: return "textformat"
+        case .authorAZ: return "person"
+        case .yearNewest, .yearOldest: return "calendar"
+        }
+    }
+
+    /// Returns `papers` ordered by this option.
+    func apply(to papers: [CachedPaper]) -> [CachedPaper] {
+        switch self {
+        case .recentlyAdded:
+            return papers.sorted { ($0.addedAt ?? "") > ($1.addedAt ?? "") }
+        case .oldestAdded:
+            // Items without a date sort to the end.
+            return papers.sorted {
+                ($0.addedAt ?? "~") < ($1.addedAt ?? "~")
+            }
+        case .titleAZ:
+            return papers.sorted {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+        case .authorAZ:
+            return papers.sorted {
+                let a = $0.authors.first ?? "~"
+                let b = $1.authors.first ?? "~"
+                let cmp = a.localizedCaseInsensitiveCompare(b)
+                if cmp == .orderedSame {
+                    return $0.title.localizedCaseInsensitiveCompare($1.title)
+                        == .orderedAscending
+                }
+                return cmp == .orderedAscending
+            }
+        case .yearNewest:
+            return papers.sorted { ($0.year ?? "") > ($1.year ?? "") }
+        case .yearOldest:
+            return papers.sorted { ($0.year ?? "~") < ($1.year ?? "~") }
+        }
+    }
+}
+
 /// The whole cached library: filter, search, add-by-DOI, browse collections.
 struct LibraryView: View {
     @EnvironmentObject private var store: QueueStore
 
     @Query(sort: [SortDescriptor(\CachedPaper.addedAt, order: .reverse)])
     private var papers: [CachedPaper]
+
+    @AppStorage("librarySort") private var sortRaw = LibrarySort.recentlyAdded.rawValue
+    private var sort: LibrarySort { LibrarySort(rawValue: sortRaw) ?? .recentlyAdded }
+
+    /// Animates the list reorder when the sort option changes.
+    private var sortBinding: Binding<LibrarySort> {
+        Binding(
+            get: { sort },
+            set: { newValue in
+                withAnimation(.easeInOut(duration: 0.28)) { sortRaw = newValue.rawValue }
+            })
+    }
 
     @State private var search = ""
     @State private var filter: LibraryFilter = .all
@@ -97,7 +163,7 @@ struct LibraryView: View {
                     || ($0.publicationTitle?.lowercased().contains(q) ?? false)
             }
         }
-        return result
+        return sort.apply(to: result)
     }
 
     var body: some View {
@@ -105,12 +171,17 @@ struct LibraryView: View {
             Group {
                 if store.isSyncing && papers.isEmpty {
                     loadingLibrary
+                        .transition(.opacity)
                 } else if papers.isEmpty {
                     emptyLibrary
+                        .transition(.opacity)
                 } else {
                     list
+                        .transition(.opacity)
                 }
             }
+            .animation(.easeInOut(duration: 0.3), value: papers.isEmpty)
+            .animation(.easeInOut(duration: 0.3), value: store.isSyncing)
             .navigationTitle("Library")
             .searchable(text: $search, prompt: "Search title, author, journal")
             .toolbar { toolbarContent }
@@ -157,9 +228,18 @@ struct LibraryView: View {
                     row(paper)
                 }
             } header: {
-                Text("^[\(filtered.count) paper](inflect: true)")
+                HStack {
+                    Text("^[\(filtered.count) item](inflect: true)")
+                    Spacer()
+                    Label(sort.rawValue, systemImage: sort.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .textCase(nil)
+                }
             }
         }
+        .animation(.easeInOut(duration: 0.28), value: filtered.map(\.zoteroKey))
     }
 
     @ViewBuilder
@@ -207,6 +287,8 @@ struct LibraryView: View {
         HStack(spacing: 8) {
             PaperRowView(paper: paper, showStatus: true)
             quickAction(paper)
+                .animation(Theme.subtleSpring, value: paper.isPending)
+                .animation(Theme.subtleSpring, value: paper.readStatus)
         }
         .contentShape(Rectangle())
         .background {
@@ -240,6 +322,7 @@ struct LibraryView: View {
         if paper.readStatus == "read" {
             Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(.green)
+                .contentTransition(.symbolEffect(.replace))
                 .help("Read")
         } else if paper.isPending {
             // In a queue — show a clear green check (plus the queue name when
@@ -253,6 +336,7 @@ struct LibraryView: View {
                 }
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
+                    .contentTransition(.symbolEffect(.replace))
             }
             .help(paper.queueName.map { "In “\($0)” queue" } ?? "In your reading queue")
         } else if store.availableQueues.count > 1 {
@@ -279,9 +363,9 @@ struct LibraryView: View {
         } else {
             Button { store.addToQueue(paper) } label: {
                 Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(Theme.accent)
             }
-            .buttonStyle(.borderless)
-            .tint(Theme.accent)
+            .buttonStyle(PressableButtonStyle())
             .help("Add to reading queue")
         }
     }
@@ -363,6 +447,18 @@ struct LibraryView: View {
         ToolbarItem(placement: .primaryAction) {
             Button { showingAdd = true } label: { Image(systemName: "plus") }
                 .help("Add a paper by DOI")
+        }
+        ToolbarItem(placement: .secondaryAction) {
+            Menu {
+                Picker("Sort by", selection: sortBinding) {
+                    ForEach(LibrarySort.allCases) { option in
+                        Label(option.rawValue, systemImage: option.systemImage)
+                            .tag(option)
+                    }
+                }
+            } label: {
+                Label("Sort: \(sort.rawValue)", systemImage: "arrow.up.arrow.down")
+            }
         }
         ToolbarItem(placement: .secondaryAction) {
             Button { showingFilters = true } label: {
