@@ -21,7 +21,9 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-14
+    # macos-15 ships Xcode 16, which the XcodeGen project format (objectVersion
+    # 77) requires — macos-14's Xcode 15.4 can't open it.
+    runs-on: macos-15
     steps:
       - name: Resolve tag
         id: tag
@@ -40,7 +42,12 @@ jobs:
           fetch-depth: 0
 
       - name: Select latest Xcode
-        run: sudo xcode-select -switch /Applications/Xcode.app
+        run: |
+          LATEST=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$LATEST" ]; then LATEST=/Applications/Xcode.app; fi
+          echo "Using $LATEST"
+          sudo xcode-select -switch "$LATEST"
+          xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen
