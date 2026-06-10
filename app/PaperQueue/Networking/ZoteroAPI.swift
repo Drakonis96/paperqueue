@@ -97,19 +97,27 @@ struct ZoteroAPI {
     let libraryPath: String
     let apiKey: String?
 
-    /// Resolves the active client from the chosen data source + stored creds.
+    /// Resolves the active *read* client from the chosen data source + creds.
     static func current() -> ZoteroAPI? {
         switch AppConfig.dataSource {
         case .local:
             return ZoteroAPI(
                 baseURL: localBase, libraryPath: "users/0", apiKey: nil)
         case .web:
-            guard let key = KeychainStore.apiKey(),
-                  let uid = AppConfig.zoteroUserId
-            else { return nil }
-            return ZoteroAPI(
-                baseURL: webBase, libraryPath: "users/\(uid)", apiKey: key)
+            return webWriteClient()
         }
+    }
+
+    /// A client that can *write* to Zotero (always the web API, which accepts
+    /// PATCH/POST — the local desktop API is read-only). Available whenever a
+    /// web API key + user id are stored, even in local mode, so the Mac can
+    /// mirror queue/read state to the cloud and keep other devices in sync.
+    static func webWriteClient() -> ZoteroAPI? {
+        guard let key = KeychainStore.apiKey(),
+              let uid = AppConfig.zoteroUserId
+        else { return nil }
+        return ZoteroAPI(
+            baseURL: webBase, libraryPath: "users/\(uid)", apiKey: key)
     }
 
     // MARK: Sign-in helpers
@@ -146,8 +154,11 @@ struct ZoteroAPI {
     // MARK: Reads
 
     /// Top-level items only (excludes attachments/notes/annotations) — fast.
-    func topItems() async throws -> [ZoteroItem] {
-        try await paginatedItems(path: "items/top")
+    /// `onProgress` reports a 0…1 fraction as pages stream in (for a progress bar).
+    func topItems(
+        onProgress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> [ZoteroItem] {
+        try await paginatedItems(path: "items/top", onProgress: onProgress)
     }
 
     /// Child items of an item (used to find a PDF attachment on demand).
@@ -230,7 +241,9 @@ struct ZoteroAPI {
 
     // MARK: - Internals
 
-    private func paginatedItems(path: String) async throws -> [ZoteroItem] {
+    private func paginatedItems(
+        path: String, onProgress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> [ZoteroItem] {
         var all: [ZoteroItem] = []
         let limit = 100
         var start = 0
@@ -259,9 +272,13 @@ struct ZoteroAPI {
             let total = Int(
                 response.value(forHTTPHeaderField: "Total-Results") ?? "")
                 ?? all.count
+            if let onProgress, total > 0 {
+                onProgress(min(Double(all.count) / Double(total), 1))
+            }
             start += limit
             if start >= total || batch.isEmpty { break }
         }
+        onProgress?(1)
         return all
     }
 

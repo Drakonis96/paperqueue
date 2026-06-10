@@ -6,15 +6,18 @@ import WidgetKit
 /// Offline-first sync between the local SwiftData cache and Zotero.
 ///
 /// Source of truth for queue state is a set of namespaced Zotero tags
-/// (`pq:queue`, `pq:pos:<n>`, `pq:read`, `pq:skip`) written via the web API, so
-/// the curated queue + order + read state sync across devices. In local mode
-/// (Mac, read-only API) state is kept locally instead.
+/// (`pq:queue`, `pq:qname:<name>`, `pq:pos:<n>`, `pq:read`, `pq:skip`) written
+/// via the web API, so the curated queue(s) + order + read state sync across
+/// devices. The local desktop API is read-only, so even in local mode (Mac) we
+/// *write* through the web API when an API key is attached — this keeps a Mac
+/// reading locally and a phone using the web API in sync through Zotero itself.
 @MainActor
 final class QueueStore: ObservableObject {
     static let queueTag = "pq:queue"
     static let readTag = "pq:read"
     static let skipTag = "pq:skip"
     static let posPrefix = "pq:pos:"
+    static let qnamePrefix = "pq:qname:"
     static let posGap = 1024.0
     static let dayInterval: TimeInterval = 24 * 60 * 60
 
@@ -31,17 +34,28 @@ final class QueueStore: ObservableObject {
     @Published var lastError: String?
     @Published var isOffline = false
     @Published var syncSummary: String?
+    /// 0…1 fraction while fetching the library (nil when not fetching).
+    @Published var syncProgress: Double?
+
+    /// All selectable queues (Default first), and which one the Queue tab shows.
+    @Published var availableQueues: [String]
+    @Published var activeQueue: String
 
     private let context: ModelContext
 
     init(context: ModelContext) {
         self.context = context
+        self.availableQueues = AppConfig.allQueueNames
+        let active = AppConfig.activeQueueName
+        self.activeQueue = AppConfig.allQueueNames.contains(active)
+            ? active : AppConfig.defaultQueueName
     }
 
     private let nonPaperTypes: Set<String> = ["attachment", "note", "annotation"]
 
-    /// Whether queue state is mirrored to Zotero tags (web) or kept local only.
-    private var writesTags: Bool { AppConfig.dataSource == .web }
+    /// Whether queue state is mirrored to Zotero tags. True whenever a web API
+    /// key is available (web mode, or local mode with an attached key).
+    private var writesTags: Bool { ZoteroAPI.webWriteClient() != nil }
 
     // MARK: - Loading
 
@@ -69,15 +83,19 @@ final class QueueStore: ObservableObject {
         }
         isSyncing = true
         lastError = nil
+        syncProgress = 0
         syncSummary = "Fetching library…"
         defer {
             isSyncing = false
+            syncProgress = nil
             updateWidget()
         }
         await flushOutbox()
 
         do {
-            let items = try await zotero.topItems()
+            let items = try await zotero.topItems { fraction in
+                Task { @MainActor in self.syncProgress = fraction }
+            }
             reconcile(items, tagsAuthoritative: writesTags)
             isOffline = false
             lastError = nil
@@ -104,9 +122,9 @@ final class QueueStore: ObservableObject {
     }
 
     /// Reconciles fetched items into the cache.
-    /// - tagsAuthoritative: when true (web), queue/read state is derived from
-    ///   `pq:` tags. When false (local), only metadata is refreshed and local
-    ///   queue decisions are preserved.
+    /// - tagsAuthoritative: when true, queue/read state is derived from `pq:`
+    ///   tags. When false (local with no web key), only metadata is refreshed
+    ///   and local queue decisions are preserved.
     private func reconcile(_ items: [ZoteroItem], tagsAuthoritative: Bool) {
         // `items` are top-level only. The PDF attachment key is resolved lazily
         // (in the detail view) so sync stays fast.
@@ -119,6 +137,16 @@ final class QueueStore: ObservableObject {
         var byKey = Dictionary(
             existing.map { ($0.zoteroKey, $0) }, uniquingKeysWith: { a, _ in a })
 
+        // Items with an unsynced local change keep their optimistic state — the
+        // remote tags may not reflect the change yet (esp. via the web write +
+        // local read round-trip), so don't clobber them this pass.
+        let pendingOutbox: Set<String> = {
+            let actions = (try? context.fetch(
+                FetchDescriptor<OutboxAction>())) ?? []
+            return Set(actions.map(\.paperKey))
+        }()
+
+        var discoveredQueues: [String] = []
         let now = Date()
         for item in tops {
             let d = item.data
@@ -153,7 +181,7 @@ final class QueueStore: ObservableObject {
             paper.tags = tags
             paper.updatedAt = now
 
-            guard tagsAuthoritative else { continue }
+            guard tagsAuthoritative, !pendingOutbox.contains(d.key) else { continue }
 
             // Web mode: derive queue/read state from pq: tags.
             let read = isRead(tags)
@@ -165,11 +193,16 @@ final class QueueStore: ObservableObject {
 
             if read {
                 paper.queueStatus = "read"
+                paper.queueName = nil
                 paper.isPending = false
             } else if skipped {
                 paper.queueStatus = "skipped"
+                paper.queueName = nil
                 paper.isPending = false
             } else if queued {
+                let queueName = parseQueueName(tags)
+                paper.queueName = queueName
+                if let queueName { discoveredQueues.append(queueName) }
                 let postponedActive = paper.queueStatus == "postponed"
                     && (paper.postponedUntil ?? .distantPast) > now
                 if postponedActive {
@@ -181,6 +214,7 @@ final class QueueStore: ObservableObject {
                 }
             } else {
                 paper.queueStatus = nil
+                paper.queueName = nil
                 paper.isPending = false
             }
         }
@@ -189,6 +223,7 @@ final class QueueStore: ObservableObject {
             context.delete(paper)
         }
         try? context.save()
+        registerQueues(discoveredQueues)
     }
 
     private func reevaluatePostpones() {
@@ -207,34 +242,119 @@ final class QueueStore: ObservableObject {
         if changed { try? context.save() }
     }
 
+    // MARK: - Queues
+
+    /// Maps a display name to the stored queue name (`nil` for the Default
+    /// queue, which uses a bare `pq:queue` tag with no `pq:qname:`).
+    private func storedName(for display: String) -> String? {
+        display == AppConfig.defaultQueueName ? nil : display
+    }
+
+    /// Reloads the published queue list from persistence, keeping `activeQueue`
+    /// valid.
+    private func refreshQueues() {
+        availableQueues = AppConfig.allQueueNames
+        if !availableQueues.contains(activeQueue) {
+            activeQueue = AppConfig.defaultQueueName
+            AppConfig.activeQueueName = activeQueue
+        }
+    }
+
+    /// Adds any queue names discovered from synced tags to the persisted list.
+    private func registerQueues(_ names: [String]) {
+        let new = names.uniqued().filter {
+            !AppConfig.allQueueNames.contains($0)
+        }
+        guard !new.isEmpty else { return }
+        AppConfig.customQueueNames = AppConfig.customQueueNames + new
+        refreshQueues()
+    }
+
+    func setActiveQueue(_ name: String) {
+        guard availableQueues.contains(name) else { return }
+        activeQueue = name
+        AppConfig.activeQueueName = name
+    }
+
+    /// Creates a personalized queue and makes it active. No-op for blank or
+    /// duplicate names.
+    @discardableResult
+    func createQueue(_ rawName: String) -> Bool {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty,
+              !AppConfig.allQueueNames.contains(where: {
+                  $0.caseInsensitiveCompare(name) == .orderedSame })
+        else { return false }
+        AppConfig.customQueueNames = AppConfig.customQueueNames + [name]
+        refreshQueues()
+        setActiveQueue(name)
+        return true
+    }
+
+    /// Deletes a personalized queue, moving its papers to the Default queue.
+    /// The Default queue cannot be deleted.
+    func deleteQueue(_ name: String) {
+        guard name != AppConfig.defaultQueueName else { return }
+        let stored = storedName(for: name)
+        let descriptor = FetchDescriptor<CachedPaper>(
+            predicate: #Predicate { $0.isPending })
+        let members = ((try? context.fetch(descriptor)) ?? [])
+            .filter { $0.queueName == stored }
+        for paper in members {
+            addToQueue(paper, queue: AppConfig.defaultQueueName)
+        }
+        AppConfig.customQueueNames = AppConfig.customQueueNames
+            .filter { $0 != name }
+        if activeQueue == name { activeQueue = AppConfig.defaultQueueName }
+        AppConfig.activeQueueName = activeQueue
+        refreshQueues()
+    }
+
     // MARK: - Mutations
 
-    func addToQueue(_ paper: CachedPaper) {
-        let pos = nextPosition()
+    /// Adds (or moves) a paper to a queue. Defaults to the Default queue when no
+    /// queue is specified.
+    func addToQueue(_ paper: CachedPaper, queue: String = AppConfig.defaultQueueName) {
+        let stored = storedName(for: queue)
+        let pos = nextPosition(in: stored)
         paper.readStatus = "unread"
         paper.queueStatus = "pending"
+        paper.queueName = stored
         paper.postponedUntil = nil
         paper.readDate = nil
         paper.isPending = true
         paper.sortPriority = pos
-        applyState(paper, queued: true, read: false, skipped: false, pos: pos)
+        applyState(
+            paper, queued: true, read: false, skipped: false, pos: pos,
+            queueName: stored)
+    }
+
+    /// Moves an already-queued paper to another queue (alias of addToQueue).
+    func moveToQueue(_ paper: CachedPaper, queue: String) {
+        addToQueue(paper, queue: queue)
     }
 
     func markRead(_ paper: CachedPaper) {
         paper.readStatus = "read"
         paper.queueStatus = "read"
+        paper.queueName = nil
         paper.postponedUntil = nil
         paper.readDate = Date()
         paper.isPending = false
-        applyState(paper, queued: false, read: true, skipped: false, pos: nil)
+        applyState(
+            paper, queued: false, read: true, skipped: false, pos: nil,
+            queueName: nil)
     }
 
     func skip(_ paper: CachedPaper) {
         paper.readStatus = "skipped"
         paper.queueStatus = "skipped"
+        paper.queueName = nil
         paper.readDate = nil
         paper.isPending = false
-        applyState(paper, queued: false, read: false, skipped: true, pos: nil)
+        applyState(
+            paper, queued: false, read: false, skipped: true, pos: nil,
+            queueName: nil)
     }
 
     func reset(_ paper: CachedPaper) {
@@ -255,10 +375,13 @@ final class QueueStore: ObservableObject {
     private func clearLists(_ paper: CachedPaper) {
         paper.readStatus = "unread"
         paper.queueStatus = nil
+        paper.queueName = nil
         paper.postponedUntil = nil
         paper.readDate = nil
         paper.isPending = false
-        applyState(paper, queued: false, read: false, skipped: false, pos: nil)
+        applyState(
+            paper, queued: false, read: false, skipped: false, pos: nil,
+            queueName: nil)
     }
 
     /// Postpone is a local-only UX action; it keeps the `pq:queue` tag.
@@ -272,8 +395,8 @@ final class QueueStore: ObservableObject {
         updateWidget()
     }
 
-    /// Adds a Zotero item picked from a collection to the queue.
-    func enqueue(_ item: ZoteroItem) {
+    /// Adds a Zotero item picked from a collection to a queue.
+    func enqueue(_ item: ZoteroItem, queue: String = AppConfig.defaultQueueName) {
         let d = item.data
         let key = d.key
         let descriptor = FetchDescriptor<CachedPaper>(
@@ -292,7 +415,7 @@ final class QueueStore: ObservableObject {
                 addedAt: d.dateAdded, sortPriority: 0)
             context.insert(paper)
         }
-        addToQueue(paper)
+        addToQueue(paper, queue: queue)
     }
 
     /// Clears the entire local cache (used on sign-out / account switch).
@@ -302,13 +425,17 @@ final class QueueStore: ObservableObject {
         try? context.delete(model: ReadingSessionLocal.self)
         try? context.save()
         syncSummary = nil
+        refreshQueues()
         updateWidget()
     }
 
     /// Adds a paper to the Zotero library by DOI (metadata via Crossref), then
     /// resyncs. Returns true on success.
     func addByDOI(_ doi: String) async -> Bool {
-        guard let zotero = ZoteroAPI.current() else { return false }
+        // Creating items needs a writable (web) client; the local API is
+        // read-only.
+        guard let zotero = ZoteroAPI.webWriteClient() ?? ZoteroAPI.current()
+        else { return false }
         isSyncing = true
         defer { isSyncing = false }
         do {
@@ -340,7 +467,7 @@ final class QueueStore: ObservableObject {
             if writesTags {
                 let tags = desiredTags(
                     paper.tags, queued: true, read: false, skipped: false,
-                    pos: newPos)
+                    pos: newPos, queueName: paper.queueName)
                 paper.tags = tags
                 context.insert(OutboxAction(paperKey: paper.zoteroKey, tags: tags))
                 wroteAny = true
@@ -354,10 +481,11 @@ final class QueueStore: ObservableObject {
     /// Applies the local state change and (web mode) queues the matching tag set.
     private func applyState(
         _ paper: CachedPaper, queued: Bool, read: Bool, skipped: Bool,
-        pos: Double?
+        pos: Double?, queueName: String?
     ) {
         let tags = desiredTags(
-            paper.tags, queued: queued, read: read, skipped: skipped, pos: pos)
+            paper.tags, queued: queued, read: read, skipped: skipped, pos: pos,
+            queueName: queueName)
         paper.tags = tags
         paper.updatedAt = Date()
         try? context.save()
@@ -370,7 +498,7 @@ final class QueueStore: ObservableObject {
     }
 
     func flushOutbox() async {
-        guard writesTags, let zotero = ZoteroAPI.current() else { return }
+        guard writesTags, let zotero = ZoteroAPI.webWriteClient() else { return }
         let descriptor = FetchDescriptor<OutboxAction>(
             sortBy: [SortDescriptor(\.createdAt)])
         guard let actions = try? context.fetch(descriptor), !actions.isEmpty
@@ -396,12 +524,16 @@ final class QueueStore: ObservableObject {
     // MARK: - Helpers
 
     private func desiredTags(
-        _ base: [String], queued: Bool, read: Bool, skipped: Bool, pos: Double?
+        _ base: [String], queued: Bool, read: Bool, skipped: Bool, pos: Double?,
+        queueName: String?
     ) -> [String] {
         var tags = base.filter { !$0.hasPrefix("pq:") }
         if queued {
             tags.append(Self.queueTag)
             if let pos { tags.append(Self.posPrefix + String(Int(pos))) }
+            if let queueName, !queueName.isEmpty {
+                tags.append(Self.qnamePrefix + queueName)
+            }
         }
         if read {
             tags.append(Self.readTag + ":"
@@ -430,10 +562,19 @@ final class QueueStore: ObservableObject {
         return nil
     }
 
-    private func nextPosition() -> Double {
+    private func parseQueueName(_ tags: [String]) -> String? {
+        for tag in tags where tag.hasPrefix(Self.qnamePrefix) {
+            let name = String(tag.dropFirst(Self.qnamePrefix.count))
+            return name.isEmpty ? nil : name
+        }
+        return nil
+    }
+
+    private func nextPosition(in queueName: String?) -> Double {
         let descriptor = FetchDescriptor<CachedPaper>(
             predicate: #Predicate { $0.isPending })
-        let pending = (try? context.fetch(descriptor)) ?? []
+        let pending = ((try? context.fetch(descriptor)) ?? [])
+            .filter { $0.queueName == queueName }
         let maxPos = pending.map(\.sortPriority)
             .filter { $0 < .greatestFiniteMagnitude }
             .max() ?? 0

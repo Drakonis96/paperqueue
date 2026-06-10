@@ -15,9 +15,19 @@ struct QueueView: View {
         sort: [SortDescriptor(\CachedPaper.sortPriority),
                SortDescriptor(\CachedPaper.zoteroKey)]
     )
-    private var papers: [CachedPaper]
+    private var allPending: [CachedPaper]
 
     @State private var path = NavigationPath()
+    @State private var showingNewQueue = false
+    @State private var newQueueName = ""
+    @State private var showingDeleteQueue = false
+
+    /// Papers in the currently selected queue.
+    private var papers: [CachedPaper] {
+        let stored = store.activeQueue == AppConfig.defaultQueueName
+            ? nil : store.activeQueue
+        return allPending.filter { $0.queueName == stored }
+    }
 
     private var showError: Binding<Bool> {
         Binding(
@@ -34,8 +44,13 @@ struct QueueView: View {
                     list
                 }
             }
-            .navigationTitle("Reading Queue")
+            .navigationTitle(store.activeQueue == AppConfig.defaultQueueName
+                ? "Reading Queue" : store.activeQueue)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar { toolbarContent }
+            .safeAreaInset(edge: .top) { syncProgressBar }
             .refreshable { await store.syncLibrary() }
             .navigationDestination(for: QueueRoute.self) { route in
                 switch route {
@@ -49,12 +64,54 @@ struct QueueView: View {
             } message: {
                 Text(store.lastError ?? "")
             }
+            .alert("New queue", isPresented: $showingNewQueue) {
+                TextField("Queue name", text: $newQueueName)
+                Button("Create") {
+                    store.createQueue(newQueueName)
+                    newQueueName = ""
+                }
+                Button("Cancel", role: .cancel) { newQueueName = "" }
+            } message: {
+                Text("Group papers into a separate reading queue.")
+            }
+            .confirmationDialog(
+                "Delete “\(store.activeQueue)”?",
+                isPresented: $showingDeleteQueue,
+                titleVisibility: .visible
+            ) {
+                Button("Delete queue", role: .destructive) {
+                    store.deleteQueue(store.activeQueue)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its papers move back to the Default queue.")
+            }
         }
         .onChange(of: router.readerPaperKey) { _, newValue in
             if let key = newValue {
                 path.append(QueueRoute.detail(key))
                 router.readerPaperKey = nil
             }
+        }
+    }
+
+    @ViewBuilder
+    private var syncProgressBar: some View {
+        if store.isSyncing {
+            VStack(spacing: 4) {
+                if let progress = store.syncProgress {
+                    ProgressView(value: progress)
+                } else {
+                    ProgressView(value: 0).progressViewStyle(.linear)
+                }
+                Text(store.syncSummary ?? "Fetching library…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            .background(.bar)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -94,6 +151,7 @@ struct QueueView: View {
                         }
                         .tint(.gray)
                     }
+                    .contextMenu { moveMenu(paper) }
                 }
                 .onMove(perform: move)
             } header: {
@@ -103,6 +161,25 @@ struct QueueView: View {
         #if os(iOS)
         .listStyle(.insetGrouped)
         #endif
+    }
+
+    @ViewBuilder
+    private func moveMenu(_ paper: CachedPaper) -> some View {
+        if store.availableQueues.count > 1 {
+            Menu("Move to queue", systemImage: "tray.and.arrow.down") {
+                ForEach(store.availableQueues, id: \.self) { queue in
+                    let current = paper.queueName
+                        ?? AppConfig.defaultQueueName
+                    Button {
+                        store.moveToQueue(paper, queue: queue)
+                    } label: {
+                        Label(queue, systemImage: queue == current
+                            ? "checkmark" : "tray")
+                    }
+                    .disabled(queue == current)
+                }
+            }
+        }
     }
 
     private func move(from: IndexSet, to: Int) {
@@ -138,6 +215,7 @@ struct QueueView: View {
         #if os(iOS)
         ToolbarItem(placement: .topBarLeading) { EditButton() }
         #endif
+        ToolbarItem(placement: .principal) { queueMenu }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 Task { await store.syncLibrary() }
@@ -149,6 +227,42 @@ struct QueueView: View {
                 }
             }
             .disabled(store.isSyncing)
+        }
+    }
+
+    private var queueMenu: some View {
+        Menu {
+            Picker("Queue", selection: Binding(
+                get: { store.activeQueue },
+                set: { store.setActiveQueue($0) })
+            ) {
+                ForEach(store.availableQueues, id: \.self) { queue in
+                    Label(queue, systemImage: queue == AppConfig.defaultQueueName
+                        ? "tray.full" : "tray").tag(queue)
+                }
+            }
+            Divider()
+            Button {
+                showingNewQueue = true
+            } label: {
+                Label("New Queue…", systemImage: "plus")
+            }
+            if store.activeQueue != AppConfig.defaultQueueName {
+                Button(role: .destructive) {
+                    showingDeleteQueue = true
+                } label: {
+                    Label("Delete “\(store.activeQueue)”", systemImage: "trash")
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(store.activeQueue == AppConfig.defaultQueueName
+                    ? "Reading Queue" : store.activeQueue)
+                    .font(.headline)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.primary)
         }
     }
 

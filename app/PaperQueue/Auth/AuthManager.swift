@@ -62,6 +62,49 @@ final class AuthManager: ObservableObject {
         }
     }
 
+    /// True when a web API key is attached (so writes/cross-device sync work).
+    /// In local mode this is the optional sync key; in web mode it's the
+    /// account key.
+    var hasWebSync: Bool {
+        KeychainStore.apiKey() != nil && AppConfig.zoteroUserId != nil
+    }
+
+    /// Attaches a web API key while staying in local mode, so queue/read state
+    /// is mirrored to Zotero and syncs to your other devices. Returns true on
+    /// success.
+    @discardableResult
+    func attachWebKey(_ rawKey: String) async -> Bool {
+        let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return false }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let info = try await ZoteroAPI.verifyKey(key)
+            guard info.canWrite else {
+                state = .error(
+                    "This key can't write. Create one with read & write access.")
+                return false
+            }
+            KeychainStore.saveAPIKey(key)
+            AppConfig.zoteroUserId = String(info.userID)
+            AppConfig.zoteroUsername = info.username
+            return true
+        } catch {
+            state = .error(
+                (error as? APIError)?.errorDescription
+                    ?? error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Removes the attached web sync key (local mode keeps working, but changes
+    /// no longer sync to other devices).
+    func detachWebKey() {
+        KeychainStore.clear()
+        AppConfig.zoteroUserId = nil
+        AppConfig.zoteroUsername = nil
+    }
+
     /// Connects to Zotero desktop's local API on this Mac (no key needed).
     func signInLocal() async {
         isWorking = true

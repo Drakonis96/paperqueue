@@ -21,6 +21,10 @@ final class CachedPaper {
     var readStatus: String
     /// "pending" | "postponed" | "read" | "skipped"
     var queueStatus: String?
+    /// Name of the queue this paper belongs to. `nil` means the Default queue
+    /// (stored as a bare `pq:queue` tag); a value maps to a `pq:qname:<value>`
+    /// tag. Only meaningful while the paper is queued.
+    var queueName: String?
     var postponedUntil: Date?
     /// Real read date, decoded from the `pq:read:<date>` tag (multi-device).
     var readDate: Date?
@@ -62,6 +66,7 @@ final class CachedPaper {
         // Imported items are NOT auto-queued. The queue is curated explicitly
         // (via the `pq:queue` tag / "Add to queue").
         self.queueStatus = nil
+        self.queueName = nil
         self.postponedUntil = nil
         self.readDate = nil
         self.addedAt = addedAt

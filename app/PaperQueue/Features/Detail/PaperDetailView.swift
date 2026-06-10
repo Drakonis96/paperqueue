@@ -58,9 +58,13 @@ struct PaperDetailView: View {
             case "read": return ("Read", .green)
             case "skipped": return ("Skipped", .orange)
             default:
-                return paper.queueStatus == "postponed"
-                    ? ("Postponed", .orange)
-                    : ("In queue", .blue)
+                if paper.queueStatus == "postponed" {
+                    return ("Postponed", .orange)
+                }
+                if let name = paper.queueName {
+                    return ("In “\(name)”", .blue)
+                }
+                return ("In queue", .blue)
             }
         }()
         return Text(label)
@@ -149,6 +153,26 @@ struct PaperDetailView: View {
                 .buttonStyle(.bordered)
                 .tint(.green)
 
+                if store.availableQueues.count > 1 {
+                    Menu {
+                        let current = paper.queueName ?? AppConfig.defaultQueueName
+                        ForEach(store.availableQueues, id: \.self) { queue in
+                            Button {
+                                store.moveToQueue(paper, queue: queue)
+                            } label: {
+                                Label(queue, systemImage: queue == current
+                                    ? "checkmark" : "tray")
+                            }
+                            .disabled(queue == current)
+                        }
+                    } label: {
+                        Label("Move to another queue",
+                              systemImage: "tray.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
                 HStack {
                     Button {
                         store.postpone(paper)
@@ -186,6 +210,25 @@ struct PaperDetailView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+
+                if store.availableQueues.count > 1 {
+                    Menu {
+                        ForEach(store.availableQueues, id: \.self) { queue in
+                            Button {
+                                store.addToQueue(paper, queue: queue)
+                                dismiss()
+                            } label: {
+                                Label(queue, systemImage: queue
+                                    == AppConfig.defaultQueueName
+                                        ? "tray.full" : "tray")
+                            }
+                        }
+                    } label: {
+                        Label("Add to a specific queue", systemImage: "tray.2")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
 
                 Button {
                     store.markRead(paper)

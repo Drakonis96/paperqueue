@@ -11,6 +11,34 @@ enum AppConfig {
     private static let userIdKey = "zoteroUserId"
     private static let usernameKey = "zoteroUsername"
     private static let dataSourceKey = "dataSource"
+    private static let queueNamesKey = "queueNames"
+    private static let activeQueueKey = "activeQueue"
+
+    /// The default queue's display name (stored as a plain `pq:queue` tag, with
+    /// no `pq:qname:` tag — so it stays backward-compatible with v1.0 data).
+    static let defaultQueueName = "Default"
+
+    /// Names of personalized queues the user has created, persisted so an empty
+    /// queue still shows up. The Default queue is always implied and not listed.
+    static var customQueueNames: [String] {
+        get { UserDefaults.standard.stringArray(forKey: queueNamesKey) ?? [] }
+        set {
+            UserDefaults.standard.set(
+                newValue.uniqued(), forKey: queueNamesKey)
+        }
+    }
+
+    /// All selectable queues, Default first.
+    static var allQueueNames: [String] {
+        [defaultQueueName] + customQueueNames
+    }
+
+    /// The queue currently shown on the Queue tab.
+    static var activeQueueName: String {
+        get { UserDefaults.standard.string(forKey: activeQueueKey)
+            ?? defaultQueueName }
+        set { UserDefaults.standard.set(newValue, forKey: activeQueueKey) }
+    }
 
     static var zoteroUserId: String? {
         get { UserDefaults.standard.string(forKey: userIdKey) }
@@ -35,6 +63,8 @@ enum AppConfig {
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: dataSourceKey)
+        UserDefaults.standard.removeObject(forKey: queueNamesKey)
+        UserDefaults.standard.removeObject(forKey: activeQueueKey)
     }
 
     /// Deep link that asks Zotero to open a PDF (or select the item).
@@ -43,5 +73,13 @@ enum AppConfig {
             return URL(string: "zotero://open-pdf/library/items/\(attachmentKey)")!
         }
         return URL(string: "zotero://select/library/items/\(itemKey)")!
+    }
+}
+
+extension Array where Element: Hashable {
+    /// Order-preserving de-duplication.
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

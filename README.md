@@ -17,12 +17,16 @@ of *"what do I read today?" → "read it" → "next."* PaperQueue is built for t
 
 ## Features
 
-- **Reading queue** — a curated list of papers you actually intend to read.
-  Swipe to mark read, postpone, skip, or remove. Drag to reorder.
-- **Library** — browse your whole library with **search** and **filters**
-  (All / In Queue / Unread / Read, and **by collection**).
+- **Reading queues** — curated lists of papers you actually intend to read.
+  Swipe to mark read, postpone, skip, or remove. Drag to reorder. Create
+  **multiple named queues** (e.g. *To read*, *Teaching*, *Reviews*) and switch
+  between them; the Add button targets the **Default** queue unless you pick one.
+- **Library** — browse your whole library with **search** and rich **filters**:
+  status (All / In Queue / Unread / Read), collection, and searchable
+  **author / tag / publication-year** filters. Queued papers show a green check.
 - **Collections** — navigate collections and subcollections and add papers to
   the queue from there.
+- **Live sync progress** — a progress bar while your library is fetched.
 - **Add by DOI** — fetches metadata from Crossref and adds the paper to Zotero.
 - **History** — everything you've read, with real read dates.
 - **Stats** — reading streak, papers read per week, totals.
@@ -40,7 +44,8 @@ syncs through Zotero itself:
 
 | Tag | Meaning |
 | --- | --- |
-| `pq:queue` | The paper is in the reading queue |
+| `pq:queue` | The paper is in a reading queue |
+| `pq:qname:<name>` | Which named queue (absent ⇒ the Default queue) |
 | `pq:pos:<n>` | Position in the queue (gapped, so reordering is cheap) |
 | `pq:read:<YYYY-MM-DD>` | Read, with the real read date (multi-device stats) |
 | `pq:skip` | Skipped |
@@ -54,8 +59,11 @@ These are easy to find and remove in Zotero if you ever stop using the app.
   read & write). Works anywhere; needs Zotero Web sync enabled for your library
   metadata. Queue/read tags sync across devices.
 - **Local (Mac / same network):** *"Use Zotero on this Mac"* reads your local
-  Zotero library directly (all files included, no web sync) and opens PDFs in
-  Zotero. Requires Zotero to be open.
+  Zotero library directly (all files included) and opens PDFs in Zotero.
+  Requires Zotero to be open. Zotero's local API is **read-only**, so to keep a
+  Mac (local) and an iPhone/iPad (web) in sync, add a Zotero API key under
+  **Settings → Cross-device sync**: PaperQueue then *reads* locally but *writes*
+  the `pq:` tags through the web API, and Zotero propagates them to your devices.
 
 Your API key is stored only in the device **Keychain** and sent as the
 `Zotero-API-Key` header — it is never hardcoded, logged, or placed in URLs.

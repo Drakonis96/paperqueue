@@ -52,7 +52,7 @@ struct LoginView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            Text("Reads your local Zotero library directly — no key or web sync. Requires Zotero open on your Mac (same Wi-Fi for a real device).")
+            Text("Reads your local Zotero library directly. Requires Zotero open on your Mac (same Wi-Fi for a real device). Add a Zotero key later in Settings to sync your queue with your iPhone/iPad.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
