@@ -31,10 +31,12 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      # On a tag push this checks out the tag; on manual dispatch it checks out
+      # the branch it was dispatched from (main). The release step then creates
+      # the tag from this commit if it doesn't already exist.
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.tag.outputs.tag }}
           fetch-depth: 0
 
       - name: Select latest Xcode
