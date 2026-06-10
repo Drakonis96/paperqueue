@@ -24,7 +24,7 @@
           "date": "2026-06-10",
           "localizedDescription": "• Full bibliography — PaperQueue now loads every item type in your Zotero library (books, book chapters, theses, reports, conference papers…), not just journal articles.\n• Much faster sync — the library is fetched with parallel paging, so large libraries load far quicker.\n• Sort the Library — order by recently added, oldest added, title, author or publication year, and your choice is remembered.\n• Subtler, smoother animations throughout.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.2.0/PaperQueue-unsigned.ipa",
-          "size": 1600000,
+          "size": 1387210,
           "minOSVersion": "17.0"
         },
         {
