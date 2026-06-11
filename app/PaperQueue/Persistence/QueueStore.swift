@@ -51,8 +51,6 @@ final class QueueStore: ObservableObject {
             ? active : AppConfig.defaultQueueName
     }
 
-    private let nonPaperTypes: Set<String> = ["attachment", "note", "annotation"]
-
     /// Whether queue state is mirrored to Zotero tags. True whenever a web API
     /// key is available (web mode, or local mode with an attached key).
     private var writesTags: Bool { ZoteroAPI.webWriteClient() != nil }
@@ -126,11 +124,13 @@ final class QueueStore: ObservableObject {
     ///   tags. When false (local with no web key), only metadata is refreshed
     ///   and local queue decisions are preserved.
     private func reconcile(_ items: [ZoteroItem], tagsAuthoritative: Bool) {
-        // `items` are top-level only. The PDF attachment key is resolved lazily
-        // (in the detail view) so sync stays fast.
-        let tops = items.filter {
-            !nonPaperTypes.contains($0.data.itemType) && $0.data.parentItem == nil
-        }
+        // Keep every top-level library item — including standalone (parent-less)
+        // attachments and notes, which are real entries the user sees in Zotero.
+        // Only a paper's *child* PDF/note/annotation is excluded (parentItem set);
+        // `items/top` already drops those, so this guard is belt-and-suspenders.
+        // For a top-level PDF attachment the item itself *is* the PDF, so its own
+        // key is the attachment key; other papers resolve their PDF lazily.
+        let tops = items.filter { $0.data.parentItem == nil }
         let topKeys = Set(tops.map(\.data.key))
 
         let existing = (try? context.fetch(FetchDescriptor<CachedPaper>())) ?? []
@@ -151,6 +151,10 @@ final class QueueStore: ObservableObject {
         for item in tops {
             let d = item.data
             let tags = (d.tags ?? []).map(\.tag)
+            // A standalone PDF attachment is its own PDF — seed its key so
+            // "Open PDF in Zotero" works without a child lookup.
+            let selfPdfKey = (d.itemType == "attachment"
+                && d.contentType == "application/pdf") ? d.key : nil
 
             let paper: CachedPaper
             if let p = byKey[d.key] {
@@ -162,7 +166,7 @@ final class QueueStore: ObservableObject {
                     authors: authorNames(d.creators),
                     publicationTitle: d.publicationTitle, dateString: d.date,
                     doi: d.doi, urlString: d.url, tags: tags,
-                    pdfAttachmentKey: nil, readStatus: "unread",
+                    pdfAttachmentKey: selfPdfKey, readStatus: "unread",
                     addedAt: d.dateAdded, sortPriority: 0)
                 context.insert(paper)
                 byKey[d.key] = paper
@@ -599,12 +603,20 @@ final class QueueStore: ObservableObject {
             sortBy: [SortDescriptor(\.sortPriority), SortDescriptor(\.zoteroKey)])
         let pending = (try? context.fetch(descriptor)) ?? []
         let next = pending.first
+
+        // Streak + today's goal progress for the widget's gamification line.
+        let allPapers = (try? context.fetch(FetchDescriptor<CachedPaper>())) ?? []
+        let g = StatsService.quickGamification(papers: allPapers)
+
         let snapshot = WidgetSnapshot(
             pendingCount: pending.count,
             nextTitle: next?.title,
             nextAuthors: next?.authorLine,
             nextPaperKey: next?.zoteroKey,
-            updatedAt: Date())
+            updatedAt: Date(),
+            streakDays: g.streak,
+            readToday: g.readToday,
+            dailyGoal: g.goal)
         WidgetBridge.write(snapshot)
         WidgetCenter.shared.reloadAllTimelines()
     }

@@ -73,14 +73,36 @@ struct PaperQueueWidgetView: View {
                     }
                 }
             } else {
-                Text("Queue clear 🎉")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Label("All caught up", systemImage: "checkmark.seal.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.green)
             }
+
+            Spacer(minLength: 0)
+            gamificationFooter
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .widgetURL(WidgetBridge.readerURL(paperKey: snapshot.nextPaperKey))
         .containerBackground(.fill.tertiary, for: .widget)
+    }
+
+    /// Streak + today's goal progress.
+    private var gamificationFooter: some View {
+        HStack(spacing: 6) {
+            if snapshot.streakDays > 0 {
+                Label("\(snapshot.streakDays)", systemImage: "flame.fill")
+                    .foregroundStyle(.orange)
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: 3) {
+                Image(systemName: snapshot.goalMetToday
+                    ? "checkmark.circle.fill" : "target")
+                    .foregroundStyle(snapshot.goalMetToday ? .green : .secondary)
+                Text("\(snapshot.readToday)/\(snapshot.dailyGoal)")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption2.weight(.semibold))
     }
 }
 

@@ -11,8 +11,6 @@ export type SyncResult = {
   pdfs: number;
 };
 
-const NON_PAPER_TYPES = new Set(["attachment", "note", "annotation"]);
-
 function readStatusFromTags(tags: string[]): ReadStatus {
   if (tags.includes(READ_TAG)) return "read";
   if (tags.includes(SKIP_TAG)) return "skipped";
@@ -45,16 +43,22 @@ export async function syncLibrary(
     }
   }
 
-  const tops = items.filter(
-    (i) => !NON_PAPER_TYPES.has(i.data.itemType) && !i.data.parentItem,
-  );
+  // Keep every top-level item — including standalone (parent-less) attachments
+  // and notes, which are real library entries. Only a paper's *child*
+  // attachment/note/annotation is dropped (parentItem set).
+  const tops = items.filter((i) => !i.data.parentItem);
 
   let pdfs = 0;
   for (const item of tops) {
     const d = item.data;
     const tags = (d.tags ?? []).map((t) => t.tag);
     const readStatus = readStatusFromTags(tags);
-    const pdfAttachmentKey = pdfByParent.get(d.key) ?? null;
+    // A child PDF maps via its parent; a standalone PDF attachment is its own PDF.
+    const pdfAttachmentKey =
+      pdfByParent.get(d.key) ??
+      (d.itemType === "attachment" && d.contentType === "application/pdf"
+        ? d.key
+        : null);
     if (pdfAttachmentKey) pdfs++;
 
     const paperId = await papersRepo.upsert(db, {

@@ -9,6 +9,11 @@ struct SettingsView: View {
     @State private var attaching = false
     @State private var attachError: String?
 
+    @AppStorage("dailyGoal") private var dailyGoal: Int = 1
+    @AppStorage("reminderEnabled") private var reminderEnabled: Bool = false
+    @State private var reminderTime: Date = SettingsView.initialReminderTime()
+    @State private var notifDenied = false
+
     private var isLocal: Bool { AppConfig.dataSource == .local }
 
     private let keysURL = URL(string: "https://www.zotero.org/settings/keys/new")!
@@ -25,6 +30,8 @@ struct SettingsView: View {
                     }
                     .disabled(store.isSyncing)
                 }
+
+                readingGoalSection
 
                 crossDeviceSyncSection
 
@@ -51,6 +58,87 @@ struct SettingsView: View {
                 Text("Your reading stats stay on this device. Your Zotero key is removed.")
             }
         }
+    }
+
+    /// Daily goal + reminder controls that drive the gamification features.
+    @ViewBuilder
+    private var readingGoalSection: some View {
+        Section {
+            Stepper(value: $dailyGoal, in: 1...20) {
+                Label {
+                    Text("Daily goal: \(dailyGoal) \(dailyGoal == 1 ? "paper" : "papers")")
+                } icon: {
+                    Image(systemName: "target").foregroundStyle(.green)
+                }
+            }
+            .onChange(of: dailyGoal) { _, _ in NotificationManager.sync() }
+
+            Toggle(isOn: reminderBinding) {
+                Label {
+                    Text("Daily reminder")
+                } icon: {
+                    Image(systemName: "bell.badge").foregroundStyle(.orange)
+                }
+            }
+
+            if reminderEnabled {
+                DatePicker(
+                    selection: $reminderTime,
+                    displayedComponents: .hourAndMinute
+                ) {
+                    Label {
+                        Text("Reminder time")
+                    } icon: {
+                        Image(systemName: "clock").foregroundStyle(.blue)
+                    }
+                }
+                .onChange(of: reminderTime) { _, newValue in
+                    let comps = Calendar.current.dateComponents(
+                        [.hour, .minute], from: newValue)
+                    AppConfig.reminderHour = comps.hour ?? 19
+                    AppConfig.reminderMinute = comps.minute ?? 0
+                    NotificationManager.sync()
+                }
+            }
+
+            if notifDenied {
+                Text("Notifications are turned off for PaperQueue. Enable them in Settings to get reminders.")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Reading goal")
+        } footer: {
+            Text("Hit your daily goal to build a streak. The Stats tab colours each day green when you reach it.")
+        }
+    }
+
+    /// Toggle binding that requests notification permission when switched on and
+    /// reflects denial back into the UI.
+    private var reminderBinding: Binding<Bool> {
+        Binding(
+            get: { reminderEnabled },
+            set: { wantOn in
+                if wantOn {
+                    Task { @MainActor in
+                        let granted = await NotificationManager.enableReminder()
+                        reminderEnabled = granted
+                        notifDenied = !granted
+                    }
+                } else {
+                    reminderEnabled = false
+                    AppConfig.reminderEnabled = false
+                    notifDenied = false
+                    NotificationManager.sync()
+                }
+            })
+    }
+
+    private static func initialReminderTime() -> Date {
+        var comps = DateComponents()
+        comps.hour = AppConfig.reminderHour
+        comps.minute = AppConfig.reminderMinute
+        return Calendar.current.date(from: comps) ?? Date()
     }
 
     /// Lets a Mac running in local mode attach a Zotero web API key so its

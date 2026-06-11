@@ -153,11 +153,11 @@ struct ZoteroAPI {
 
     // MARK: Reads
 
-    /// Every top-level library item — books, book sections, theses, reports,
-    /// conference papers, journal articles, etc. (attachments/notes/annotations
-    /// are excluded downstream). Pages are fetched concurrently so a large
-    /// library loads fast. `onProgress` reports a 0…1 fraction (for a progress
-    /// bar).
+    /// Every top-level library item — books, journal articles, theses, etc.,
+    /// plus standalone (parent-less) attachments and notes. Only a paper's
+    /// *child* attachments/notes/annotations are left out (the endpoint already
+    /// excludes them). Pages are fetched concurrently so a large library loads
+    /// fast. `onProgress` reports a 0…1 fraction (for a progress bar).
     func topItems(
         onProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> [ZoteroItem] {

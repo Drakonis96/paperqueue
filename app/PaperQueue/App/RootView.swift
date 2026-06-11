@@ -31,7 +31,10 @@ struct MainView: View {
             tabs
             #endif
         }
-        .task { await store.initialLoad() }
+        .task {
+            NotificationManager.sync()
+            await store.initialLoad()
+        }
     }
 
     @ViewBuilder

@@ -13,6 +13,39 @@ enum AppConfig {
     private static let dataSourceKey = "dataSource"
     private static let queueNamesKey = "queueNames"
     private static let activeQueueKey = "activeQueue"
+    private static let dailyGoalKey = "dailyGoal"
+    private static let reminderEnabledKey = "reminderEnabled"
+    private static let reminderHourKey = "reminderHour"
+    private static let reminderMinuteKey = "reminderMinute"
+
+    // MARK: - Reading goal & reminders (gamification)
+
+    /// Papers the user aims to read per day. Drives the goal ring, streak and
+    /// the calendar colouring. Always at least 1.
+    static var dailyGoal: Int {
+        get {
+            let v = UserDefaults.standard.integer(forKey: dailyGoalKey)
+            return v > 0 ? v : 1
+        }
+        set { UserDefaults.standard.set(max(1, newValue), forKey: dailyGoalKey) }
+    }
+
+    /// Whether the daily reading reminder notification is scheduled.
+    static var reminderEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: reminderEnabledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: reminderEnabledKey) }
+    }
+
+    /// Hour (0…23) the daily reminder fires. Defaults to 19:00.
+    static var reminderHour: Int {
+        get { UserDefaults.standard.object(forKey: reminderHourKey) as? Int ?? 19 }
+        set { UserDefaults.standard.set(newValue, forKey: reminderHourKey) }
+    }
+
+    static var reminderMinute: Int {
+        get { UserDefaults.standard.object(forKey: reminderMinuteKey) as? Int ?? 0 }
+        set { UserDefaults.standard.set(newValue, forKey: reminderMinuteKey) }
+    }
 
     /// The default queue's display name (stored as a plain `pq:queue` tag, with
     /// no `pq:qname:` tag — so it stays backward-compatible with v1.0 data).
