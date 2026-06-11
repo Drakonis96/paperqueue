@@ -19,6 +19,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "1.5.1",
+          "buildVersion": "8",
+          "date": "2026-06-11",
+          "localizedDescription": "Bug fix: on macOS, the \"Tags on read\" picker in Settings opened empty — your Zotero tags wouldn't load. The picker sheet now sizes correctly, so the full tag list (searchable, multi-select) shows and the tags you choose are applied when you mark a paper read.",
+          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.5.1/PaperQueue-unsigned.ipa",
+          "size": 1500000,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.5.0",
           "buildVersion": "7",
           "date": "2026-06-11",

@@ -89,6 +89,11 @@ struct ReadTagsPickerView: View {
                 }
             }
         }
+        // macOS sheets don't auto-size, so the List would collapse to zero
+        // height and show nothing — give it an explicit, resizable frame.
+        #if os(macOS)
+        .frame(minWidth: 420, idealWidth: 460, minHeight: 480, idealHeight: 560)
+        #endif
     }
 
     private func isSelected(_ tag: String) -> Bool {
