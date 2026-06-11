@@ -24,7 +24,7 @@
           "date": "2026-06-11",
           "localizedDescription": "• Authors and editors are both shown now — an edited book or chapter that lists editors no longer hides the actual author. Editors are labelled (e.g. \"ed.\"), and you can filter by either.\n• New on Mac: Settings → Updates → \"Check for Updates\" downloads the latest version from GitHub, replaces the app and relaunches it automatically (falls back to opening the disk image if it can't).",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.6.0/PaperQueue-unsigned.ipa",
-          "size": 1500000,
+          "size": 1470552,
           "minOSVersion": "17.0"
         },
         {
