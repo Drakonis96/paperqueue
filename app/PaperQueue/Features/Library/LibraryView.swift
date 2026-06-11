@@ -102,6 +102,9 @@ struct LibraryView: View {
     @State private var showingCollections = false
     @State private var showingFilters = false
     @State private var path = NavigationPath()
+    #if os(macOS)
+    @State private var selection: String?
+    #endif
 
     /// Distinct authors across the library, for the author filter.
     private var allAuthors: [String] {
@@ -220,29 +223,36 @@ struct LibraryView: View {
 
     private var list: some View {
         ScrollViewReader { proxy in
-            List {
-                if activeFilterCount > 0 {
-                    Section { activeFilterChips }
-                }
-                Section {
-                    TopAnchorRow()
-                    ForEach(filtered) { paper in
-                        row(paper)
-                    }
-                } header: {
-                    HStack {
-                        Text("^[\(filtered.count) item](inflect: true)")
-                        Spacer()
-                        Label(sort.rawValue, systemImage: sort.systemImage)
-                            .labelStyle(.titleAndIcon)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .textCase(nil)
-                    }
-                }
+            listContent
+                .animation(.easeInOut(duration: 0.28), value: filtered.map(\.zoteroKey))
+                .scrollTopButton(visible: filtered.count > 7, proxy: proxy)
+        }
+    }
+
+    private var listContent: some View {
+        List { librarySections }
+    }
+
+    @ViewBuilder
+    private var librarySections: some View {
+        if activeFilterCount > 0 {
+            Section { activeFilterChips }
+        }
+        Section {
+            TopAnchorRow()
+            ForEach(filtered) { paper in
+                row(paper)
             }
-            .animation(.easeInOut(duration: 0.28), value: filtered.map(\.zoteroKey))
-            .scrollTopButton(visible: filtered.count > 7, proxy: proxy)
+        } header: {
+            HStack {
+                Text("^[\(filtered.count) item](inflect: true)")
+                Spacer()
+                Label(sort.rawValue, systemImage: sort.systemImage)
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+            }
         }
     }
 
@@ -288,6 +298,23 @@ struct LibraryView: View {
     }
 
     private func row(_ paper: CachedPaper) -> some View {
+        #if os(macOS)
+        HStack(spacing: 8) {
+            PaperRowView(paper: paper, showStatus: true)
+            quickAction(paper)
+                .animation(Theme.subtleSpring, value: paper.isPending)
+                .animation(Theme.subtleSpring, value: paper.readStatus)
+        }
+        .contentShape(Rectangle())
+        .listRowBackground(
+            selection == paper.zoteroKey
+                ? Theme.accent.opacity(0.14) : Color.clear)
+        .onTapGesture(count: 2) {
+            path.append(QueueRoute.detail(paper.zoteroKey))
+        }
+        .onTapGesture { selection = paper.zoteroKey }
+        .contextMenu { addToQueueMenu(paper) }
+        #else
         HStack(spacing: 8) {
             PaperRowView(paper: paper, showStatus: true)
             quickAction(paper)
@@ -317,6 +344,7 @@ struct LibraryView: View {
             }
         }
         .contextMenu { addToQueueMenu(paper) }
+        #endif
     }
 
     /// Visible per-row indicator/action so queue membership is obvious at a

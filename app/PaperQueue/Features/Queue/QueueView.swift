@@ -24,6 +24,9 @@ struct QueueView: View {
     @State private var movingPaper: CachedPaper?
     @State private var moveTargetText = ""
     @State private var showingMovePrompt = false
+    #if os(macOS)
+    @State private var selection: String?
+    #endif
 
     /// Papers in the currently selected queue.
     private var papers: [CachedPaper] {
@@ -136,25 +139,50 @@ struct QueueView: View {
 
     private var list: some View {
         ScrollViewReader { proxy in
-            List {
-                Section {
-                    TopAnchorRow()
-                    ForEach(papers) { paper in
-                        queueRow(paper)
-                    }
-                    .onMove(perform: move)
-                } header: {
-                    Text("\(papers.count) to read · drag or tap the number to reorder")
-                }
+            listContent
+                #if os(iOS)
+                .listStyle(.insetGrouped)
+                #endif
+                .scrollTopButton(visible: papers.count > 7, proxy: proxy)
+        }
+    }
+
+    private var listContent: some View {
+        List { queueSection }
+    }
+
+    private var queueSection: some View {
+        Section {
+            TopAnchorRow()
+            ForEach(papers) { paper in
+                queueRow(paper)
             }
-            #if os(iOS)
-            .listStyle(.insetGrouped)
-            #endif
-            .scrollTopButton(visible: papers.count > 7, proxy: proxy)
+            .onMove(perform: move)
+        } header: {
+            Text("\(papers.count) to read · drag or tap the number to reorder")
         }
     }
 
     private func queueRow(_ paper: CachedPaper) -> some View {
+        #if os(macOS)
+        // Single click selects; double click opens. Actions are visible buttons
+        // (swipe is awkward with a mouse).
+        HStack(spacing: 10) {
+            PaperRowView(
+                paper: paper,
+                position: positions[paper.zoteroKey],
+                onPositionTap: { beginMove(paper) })
+            Spacer(minLength: 8)
+            macQueueActions(paper)
+        }
+        .contentShape(Rectangle())
+        .listRowBackground(macSelectionBackground(paper))
+        .onTapGesture(count: 2) {
+            path.append(QueueRoute.detail(paper.zoteroKey))
+        }
+        .onTapGesture { selection = paper.zoteroKey }
+        .contextMenu { moveMenu(paper) }
+        #else
         PaperRowView(
             paper: paper,
             position: positions[paper.zoteroKey],
@@ -196,7 +224,29 @@ struct QueueView: View {
             .tint(.gray)
         }
         .contextMenu { moveMenu(paper) }
+        #endif
     }
+
+    #if os(macOS)
+    /// Highlight for the click-selected row (single click selects; double opens).
+    private func macSelectionBackground(_ paper: CachedPaper) -> some View {
+        (selection == paper.zoteroKey ? Theme.accent.opacity(0.14) : Color.clear)
+    }
+
+    @ViewBuilder
+    private func macQueueActions(_ paper: CachedPaper) -> some View {
+        HStack(spacing: 2) {
+            MacRowButton(icon: "checkmark.circle.fill", tint: .green,
+                         help: "Mark read") { store.markRead(paper) }
+            MacRowButton(icon: "clock.fill", tint: .orange,
+                         help: "Read later") { store.postpone(paper) }
+            MacRowButton(icon: "xmark.circle", tint: .secondary,
+                         help: "Skip") { store.skip(paper) }
+            MacRowButton(icon: "minus.circle", tint: .secondary,
+                         help: "Remove from queue") { store.removeFromQueue(paper) }
+        }
+    }
+    #endif
 
     @ViewBuilder
     private func moveMenu(_ paper: CachedPaper) -> some View {

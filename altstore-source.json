@@ -19,6 +19,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "1.5.0",
+          "buildVersion": "7",
+          "date": "2026-06-11",
+          "localizedDescription": "A much better Mac experience:\n• Single click now just selects a paper; double-click opens it (no more accidental navigation).\n• The reading queue shows large, always-visible action buttons on the right of each row — mark read, read later, skip and remove — so you no longer need fiddly swipes.\n• History rows get visible buttons too (send back to queue, remove).\n• The selected row is clearly highlighted.\nThese changes are Mac-only; iPhone and iPad keep their swipe gestures.",
+          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.5.0/PaperQueue-unsigned.ipa",
+          "size": 1500000,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.4.0",
           "buildVersion": "6",
           "date": "2026-06-11",
