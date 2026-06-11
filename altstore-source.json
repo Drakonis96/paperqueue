@@ -24,7 +24,7 @@
           "date": "2026-06-11",
           "localizedDescription": "Gamification to keep you reading:\n• Daily goal — set how many papers you want to read each day and watch a progress ring fill as you go.\n• Streaks — current and best streaks reward consecutive days you hit your goal.\n• Reading calendar — every day is coloured green when you meet your goal, orange for partial, red when missed; browse month by month.\n• Richer Stats — read today / this week / this month, best day, daily average, plus a weekly chart with your goal line.\n• Daily reminder notification at a time you choose, so you never break a streak.\n• The widget now shows your streak and today's goal progress.\n• Full-library sync fix — standalone PDF/attachment items are no longer skipped, so every item in your Zotero library appears.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.3.0/PaperQueue-unsigned.ipa",
-          "size": 1500000,
+          "size": 1431779,
           "minOSVersion": "17.0"
         },
         {
