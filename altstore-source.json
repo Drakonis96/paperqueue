@@ -19,6 +19,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "1.9.0",
+          "buildVersion": "14",
+          "date": "2026-06-11",
+          "localizedDescription": "• Real-time sync — changes you make on your Mac (or any other device) now show up here within a second or two. PaperQueue keeps a live connection to Zotero and pulls updates the moment they happen, instead of only on a manual refresh, so moving between Mac and iPhone/iPad feels seamless.\n• Much lighter, faster syncing — a refresh now fetches only what changed since last time (often nothing at all) rather than re-downloading your whole library, using far less data and battery.\n• More resilient — the app refreshes automatically when you return to it, and a sync that hits a snag quietly falls back to a full refresh so your queue and read state never drift out of sync.",
+          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.9.0/PaperQueue-unsigned.ipa",
+          "size": 1810894,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.8.1",
           "buildVersion": "13",
           "date": "2026-06-11",

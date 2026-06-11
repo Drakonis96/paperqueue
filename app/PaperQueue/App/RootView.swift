@@ -22,6 +22,7 @@ struct RootView: View {
 struct MainView: View {
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var store: QueueStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -34,7 +35,26 @@ struct MainView: View {
         .task {
             NotificationManager.sync()
             await store.initialLoad()
+            // Open the live connection and catch up on anything missed while the
+            // app was closed (cheap incremental sync — usually a 304).
+            store.startLiveSync()
+            await store.syncLibrary(silent: true)
         }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                // Returning to the foreground: reconnect and refresh quietly so
+                // moving Mac ⇄ iPhone feels instant.
+                store.startLiveSync()
+                Task { await store.syncLibrary(silent: true) }
+            case .background:
+                // iOS suspends sockets in the background anyway; close cleanly.
+                store.stopLiveSync()
+            default:
+                break
+            }
+        }
+        .onDisappear { store.stopLiveSync() }
     }
 
     @ViewBuilder

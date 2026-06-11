@@ -78,6 +78,17 @@ struct ZoteroKeyInfo: Codable {
     var canWrite: Bool { access?.user?.write ?? false }
 }
 
+/// The outcome of a library read — either a full snapshot or only the items
+/// modified since a known version. `newVersion` is the library's
+/// `Last-Modified-Version` after this read (use it as the next `since`).
+/// `notModified` is true only when an incremental read found nothing changed
+/// (the cheap 304 fast path), so callers can skip reconciliation entirely.
+struct LibrarySyncResult {
+    let items: [ZoteroItem]
+    let newVersion: Int?
+    let notModified: Bool
+}
+
 // MARK: - Data source
 
 enum ZoteroSource: String, Codable {
@@ -156,15 +167,89 @@ struct ZoteroAPI {
 
     // MARK: Reads
 
-    /// Every top-level library item — books, journal articles, theses, etc.,
+    /// Reads top-level library items — books, journal articles, theses, etc.,
     /// plus standalone (parent-less) attachments and notes. Only a paper's
     /// *child* attachments/notes/annotations are left out (the endpoint already
-    /// excludes them). Pages are fetched concurrently so a large library loads
-    /// fast. `onProgress` reports a 0…1 fraction (for a progress bar).
-    func topItems(
+    /// excludes them).
+    ///
+    /// When `since` is nil this is a full snapshot (pages fetched concurrently so
+    /// a large library loads fast). When `since` is a known library version it is
+    /// an *incremental* read: the request carries `If-Modified-Since-Version`, so
+    /// if nothing changed the server answers `304` and we return `notModified`
+    /// with no body; otherwise only the items modified since that version come
+    /// back. Either way `newVersion` carries the library's current
+    /// `Last-Modified-Version` for the next round. `onProgress` reports a 0…1
+    /// fraction (for the progress bar).
+    func librarySync(
+        since: Int? = nil,
         onProgress: (@Sendable (Double) -> Void)? = nil
-    ) async throws -> [ZoteroItem] {
-        try await paginatedItems(path: "items/top", onProgress: onProgress)
+    ) async throws -> LibrarySyncResult {
+        let limit = Self.pageLimit
+
+        // First page also tells us the total count and the library version.
+        let first = try await fetchItemPage(
+            path: "items/top", start: 0, limit: limit, since: since)
+        if first.notModified {
+            onProgress?(1)
+            return LibrarySyncResult(
+                items: [], newVersion: since, notModified: true)
+        }
+        let version = first.libraryVersion
+        var loaded = first.items.count
+        onProgress?(
+            first.total > 0 ? min(Double(loaded) / Double(first.total), 1) : 1)
+
+        if loaded >= first.total || first.items.isEmpty {
+            onProgress?(1)
+            return LibrarySyncResult(
+                items: first.items, newVersion: version, notModified: false)
+        }
+
+        // Remaining page offsets, fetched concurrently in bounded windows.
+        let starts = stride(from: limit, to: first.total, by: limit).map { $0 }
+        var pages: [Int: [ZoteroItem]] = [0: first.items]
+
+        var index = 0
+        while index < starts.count {
+            let window = starts[index..<min(index + Self.maxConcurrentPages, starts.count)]
+            try await withThrowingTaskGroup(of: (Int, [ZoteroItem]).self) { group in
+                for start in window {
+                    group.addTask {
+                        let page = try await self.fetchItemPage(
+                            path: "items/top", start: start, limit: limit,
+                            since: since)
+                        return (start, page.items)
+                    }
+                }
+                for try await (start, batch) in group {
+                    pages[start] = batch
+                    loaded += batch.count
+                    if let onProgress, first.total > 0 {
+                        onProgress(min(Double(loaded) / Double(first.total), 1))
+                    }
+                }
+            }
+            index += Self.maxConcurrentPages
+        }
+
+        onProgress?(1)
+        let all = pages.keys.sorted().flatMap { pages[$0] ?? [] }
+        return LibrarySyncResult(
+            items: all, newVersion: version, notModified: false)
+    }
+
+    /// Keys of items deleted from the library since `version` — so an incremental
+    /// sync can drop them from the cache (deletions don't appear in `items/top`).
+    func deletedItemKeys(since version: Int) async throws -> [String] {
+        var comps = URLComponents(
+            url: libURL("deleted"), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "since", value: "\(version)")]
+        let (data, response) = try await Self.send(authorized(comps.url!))
+        guard response.statusCode == 200 else {
+            throw APIError.server(status: response.statusCode, message: nil)
+        }
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return (obj?["items"] as? [String]) ?? []
     }
 
     /// Child items of an item (used to find a PDF attachment on demand).
@@ -271,7 +356,9 @@ struct ZoteroAPI {
         let limit = Self.pageLimit
 
         // First page also tells us how many items there are in total.
-        let (firstBatch, total) = try await fetchPage(path: path, start: 0, limit: limit)
+        let firstPage = try await fetchItemPage(path: path, start: 0, limit: limit)
+        let firstBatch = firstPage.items
+        let total = firstPage.total
         var loaded = firstBatch.count
         onProgress?(total > 0 ? min(Double(loaded) / Double(total), 1) : 1)
 
@@ -290,9 +377,9 @@ struct ZoteroAPI {
             try await withThrowingTaskGroup(of: (Int, [ZoteroItem]).self) { group in
                 for start in window {
                     group.addTask {
-                        let (batch, _) = try await self.fetchPage(
+                        let page = try await self.fetchItemPage(
                             path: path, start: start, limit: limit)
-                        return (start, batch)
+                        return (start, page.items)
                     }
                 }
                 for try await (start, batch) in group {
@@ -310,19 +397,50 @@ struct ZoteroAPI {
         return pages.keys.sorted().flatMap { pages[$0] ?? [] }
     }
 
-    /// Fetches a single page of items and reports the library's total count
-    /// (from the `Total-Results` header).
-    private func fetchPage(
-        path: String, start: Int, limit: Int
-    ) async throws -> (items: [ZoteroItem], total: Int) {
+    /// One page of an item read, plus the metadata an incremental sync needs.
+    private struct ItemPage {
+        let items: [ZoteroItem]
+        let total: Int
+        /// Library version from `Last-Modified-Version` (nil if absent).
+        let libraryVersion: Int?
+        /// True when the server answered `304 Not Modified` (nothing changed).
+        let notModified: Bool
+    }
+
+    /// Fetches a single page of items. Reports the library's total count
+    /// (`Total-Results`) and current version (`Last-Modified-Version`). When
+    /// `since` is set the request is scoped to items modified after that version,
+    /// and the first page carries `If-Modified-Since-Version` so an unchanged
+    /// library short-circuits to `304` with no body to download.
+    private func fetchItemPage(
+        path: String, start: Int, limit: Int, since: Int? = nil
+    ) async throws -> ItemPage {
         var comps = URLComponents(
             url: libURL(path), resolvingAgainstBaseURL: false)!
-        comps.queryItems = [
+        var query = [
             URLQueryItem(name: "include", value: "data"),
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "start", value: "\(start)"),
         ]
-        let (data, response) = try await Self.send(authorized(comps.url!))
+        if let since {
+            query.append(URLQueryItem(name: "since", value: "\(since)"))
+        }
+        comps.queryItems = query
+
+        var req = authorized(comps.url!)
+        // Only the first page short-circuits on 304: subsequent pages are
+        // requested solely when the library *did* change, so a conditional
+        // header there would be wrong.
+        if let since, start == 0 {
+            req.setValue(
+                "\(since)", forHTTPHeaderField: "If-Modified-Since-Version")
+        }
+
+        let (data, response) = try await Self.send(req)
+        if response.statusCode == 304 {
+            return ItemPage(
+                items: [], total: 0, libraryVersion: since, notModified: true)
+        }
         guard response.statusCode == 200 else {
             throw APIError.server(status: response.statusCode, message: nil)
         }
@@ -335,7 +453,11 @@ struct ZoteroAPI {
         let total = Int(
             response.value(forHTTPHeaderField: "Total-Results") ?? "")
             ?? (start + batch.count)
-        return (batch, total)
+        let version = Int(
+            response.value(forHTTPHeaderField: "Last-Modified-Version") ?? "")
+        return ItemPage(
+            items: batch, total: total, libraryVersion: version,
+            notModified: false)
     }
 
     private func collections(path: String) async throws -> [ZoteroCollection] {

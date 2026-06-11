@@ -291,6 +291,7 @@ struct SettingsView: View {
                     }
                     Button("Turn off sync", role: .destructive) {
                         auth.detachWebKey()
+                        store.stopLiveSync()
                         Task { await store.syncLibrary() }
                     }
                 } else {
@@ -343,6 +344,7 @@ struct SettingsView: View {
         attaching = false
         if ok {
             syncKey = ""
+            store.restartLiveSync()
             await store.syncLibrary()
         } else if case let .error(message) = auth.state {
             attachError = message

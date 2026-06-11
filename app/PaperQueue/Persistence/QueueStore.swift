@@ -43,6 +43,15 @@ final class QueueStore: ObservableObject {
 
     private let context: ModelContext
 
+    /// Serializes every sync so a background/live refresh and a manual
+    /// pull-to-refresh never run reconcile concurrently — each waits for the
+    /// previous one.
+    private var syncChain: Task<Void, Never>?
+    /// Live WebSocket to Zotero's streaming API (nil when not connected).
+    private var stream: ZoteroStreamClient?
+    /// Coalesces a burst of stream events into one sync.
+    private var liveSyncDebounce: Task<Void, Never>?
+
     init(context: ModelContext) {
         self.context = context
         self.availableQueues = AppConfig.allQueueNames
@@ -74,48 +83,195 @@ final class QueueStore: ObservableObject {
         updateWidget()
     }
 
-    func syncLibrary() async {
+    /// Syncs the library with Zotero. Incremental whenever a baseline version is
+    /// known (only the handful of items changed since last time come down — or a
+    /// `304` when nothing did), full otherwise. `silent` runs without the
+    /// progress bar / spinner / error banner — used by the foreground and live
+    /// refreshes so a one-item update never flashes UI. Syncs are serialized, so
+    /// a manual refresh and a live refresh can't collide.
+    func syncLibrary(silent: Bool = false) async {
+        await enqueueSync(silent: silent).value
+    }
+
+    @discardableResult
+    private func enqueueSync(silent: Bool) -> Task<Void, Never> {
+        let previous = syncChain
+        let task = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self else { return }
+            await self.performSync(silent: silent)
+        }
+        syncChain = task
+        return task
+    }
+
+    private func performSync(silent: Bool) async {
         guard let zotero = ZoteroAPI.current() else {
-            lastError = "Not signed in."
+            if !silent { lastError = "Not signed in." }
             return
         }
-        isSyncing = true
-        lastError = nil
-        syncProgress = 0
-        syncSummary = "Fetching library…"
+        let libPath = zotero.libraryPath
+
+        if !silent {
+            isSyncing = true
+            lastError = nil
+            syncProgress = 0
+            syncSummary = "Fetching library…"
+        }
         defer {
-            isSyncing = false
-            syncProgress = nil
+            if !silent {
+                isSyncing = false
+                syncProgress = nil
+            }
             updateWidget()
         }
         await flushOutbox()
 
         do {
-            let items = try await zotero.topItems { fraction in
-                Task { @MainActor in self.syncProgress = fraction }
-            }
-            reconcile(items, tagsAuthoritative: writesTags)
+            try await runSync(
+                zotero, libPath: libPath, allowIncremental: true, silent: silent)
             isOffline = false
-            lastError = nil
-
-            let total = (try? context.fetchCount(
-                FetchDescriptor<CachedPaper>())) ?? 0
-            let pending = (try? context.fetchCount(FetchDescriptor<CachedPaper>(
-                predicate: #Predicate { $0.isPending }))) ?? 0
-            syncSummary = "\(total) items in library · \(pending) in your queue."
+            if !silent {
+                lastError = nil
+                syncSummary = librarySummary()
+            }
         } catch is CancellationError {
             // Pull-to-refresh dismissed before the call finished — ignore.
             isOffline = false
-            lastError = nil
+            if !silent { lastError = nil }
         } catch let error as APIError where error.isCancelled {
             isOffline = false
-            lastError = nil
+            if !silent { lastError = nil }
         } catch let error as APIError where error.isOffline {
             isOffline = true
-            lastError = "You appear to be offline."
+            if !silent { lastError = "You appear to be offline." }
         } catch {
-            lastError = (error as? APIError)?.errorDescription
-                ?? error.localizedDescription
+            // An incremental read failed unexpectedly (server hiccup, or a
+            // baseline the server no longer honours). Drop the baseline and try
+            // once more from a clean full snapshot, so a transient incremental
+            // problem never leaves the cache stale.
+            if AppConfig.libraryVersion(for: libPath) != nil {
+                AppConfig.setLibraryVersion(nil, for: libPath)
+                if (try? await retryFull(
+                    zotero, libPath: libPath, silent: silent)) != nil {
+                    isOffline = false
+                    if !silent {
+                        lastError = nil
+                        syncSummary = librarySummary()
+                    }
+                    return
+                }
+            }
+            if !silent {
+                lastError = (error as? APIError)?.errorDescription
+                    ?? error.localizedDescription
+            }
+        }
+    }
+
+    /// One sync pass: incremental when a baseline exists, full otherwise.
+    private func runSync(
+        _ zotero: ZoteroAPI, libPath: String, allowIncremental: Bool,
+        silent: Bool
+    ) async throws {
+        let progress: (@Sendable (Double) -> Void)?
+        if silent {
+            progress = nil
+        } else {
+            progress = { fraction in
+                Task { @MainActor in self.syncProgress = fraction }
+            }
+        }
+        let baseline = allowIncremental
+            ? AppConfig.libraryVersion(for: libPath) : nil
+
+        if let baseline {
+            let result = try await zotero.librarySync(
+                since: baseline, onProgress: progress)
+            if result.notModified {
+                // Nothing changed remotely; still tick local postpones over.
+                reevaluatePostpones()
+                return
+            }
+            let deleted =
+                (try? await zotero.deletedItemKeys(since: baseline)) ?? []
+            reconcile(
+                result.items, tagsAuthoritative: writesTags,
+                deletedKeys: deleted, replaceAll: false)
+            if let version = result.newVersion {
+                AppConfig.setLibraryVersion(version, for: libPath)
+            }
+        } else {
+            let result = try await zotero.librarySync(
+                since: nil, onProgress: progress)
+            reconcile(
+                result.items, tagsAuthoritative: writesTags, replaceAll: true)
+            if let version = result.newVersion {
+                AppConfig.setLibraryVersion(version, for: libPath)
+            }
+        }
+    }
+
+    /// Full-snapshot retry used when an incremental pass fails. Returns Void so
+    /// the caller can detect success via `try?`.
+    private func retryFull(
+        _ zotero: ZoteroAPI, libPath: String, silent: Bool
+    ) async throws {
+        try await runSync(
+            zotero, libPath: libPath, allowIncremental: false, silent: silent)
+    }
+
+    private func librarySummary() -> String {
+        let total = (try? context.fetchCount(
+            FetchDescriptor<CachedPaper>())) ?? 0
+        let pending = (try? context.fetchCount(FetchDescriptor<CachedPaper>(
+            predicate: #Predicate { $0.isPending }))) ?? 0
+        return "\(total) items in library · \(pending) in your queue."
+    }
+
+    // MARK: - Live sync (Zotero streaming API)
+
+    /// Opens a WebSocket to Zotero so changes made elsewhere — another device,
+    /// the Zotero apps, zotero.org — push down within ~a second instead of
+    /// waiting for the next manual refresh. Needs a web key, so it runs in web
+    /// mode and in local mode with cross-device sync attached. The event only
+    /// signals *that* the library changed; we react with the normal (cheap,
+    /// incremental) sync. Safe to call repeatedly — it no-ops once connected.
+    func startLiveSync() {
+        guard stream == nil,
+              let key = KeychainStore.apiKey(),
+              let uid = AppConfig.zoteroUserId else { return }
+        let client = ZoteroStreamClient(apiKey: key, userId: uid) {
+            [weak self] _ in
+            Task { @MainActor in self?.handleRemoteChange() }
+        }
+        stream = client
+        client.start()
+    }
+
+    /// Closes the live connection (on backgrounding or sign-out).
+    func stopLiveSync() {
+        stream?.stop()
+        stream = nil
+        liveSyncDebounce?.cancel()
+        liveSyncDebounce = nil
+    }
+
+    /// Reconnects with the current credentials — call after attaching a web key
+    /// so the live connection picks it up.
+    func restartLiveSync() {
+        stopLiveSync()
+        startLiveSync()
+    }
+
+    /// Coalesces a burst of stream events (several quick edits, or the echo of
+    /// our own writes) into a single silent incremental sync.
+    private func handleRemoteChange() {
+        liveSyncDebounce?.cancel()
+        liveSyncDebounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await self.syncLibrary(silent: true)
         }
     }
 
@@ -123,7 +279,15 @@ final class QueueStore: ObservableObject {
     /// - tagsAuthoritative: when true, queue/read state is derived from `pq:`
     ///   tags. When false (local with no web key), only metadata is refreshed
     ///   and local queue decisions are preserved.
-    private func reconcile(_ items: [ZoteroItem], tagsAuthoritative: Bool) {
+    /// - deletedKeys: items removed from Zotero since the last sync (incremental
+    ///   reads only — `items/top` never lists deletions).
+    /// - replaceAll: full snapshot (true) prunes any cached paper absent from
+    ///   `items`; an incremental pass (false) only drops `deletedKeys` and leaves
+    ///   unchanged papers — which aren't in this partial result — untouched.
+    private func reconcile(
+        _ items: [ZoteroItem], tagsAuthoritative: Bool,
+        deletedKeys: [String] = [], replaceAll: Bool = true
+    ) {
         // Keep every top-level library item — including standalone (parent-less)
         // attachments and notes, which are real entries the user sees in Zotero.
         // Only a paper's *child* PDF/note/annotation is excluded (parentItem set);
@@ -226,8 +390,17 @@ final class QueueStore: ObservableObject {
             }
         }
 
-        for paper in existing where !topKeys.contains(paper.zoteroKey) {
-            context.delete(paper)
+        if replaceAll {
+            // Full snapshot: anything no longer in the library is gone.
+            for paper in existing where !topKeys.contains(paper.zoteroKey) {
+                context.delete(paper)
+            }
+        } else if !deletedKeys.isEmpty {
+            // Incremental: only remove the items Zotero reports as deleted.
+            let removed = Set(deletedKeys)
+            for paper in existing where removed.contains(paper.zoteroKey) {
+                context.delete(paper)
+            }
         }
         try? context.save()
         registerQueues(discoveredQueues)
@@ -427,12 +600,16 @@ final class QueueStore: ObservableObject {
         addToQueue(paper, queue: queue)
     }
 
-    /// Clears the entire local cache (used on sign-out / account switch).
+    /// Clears the entire local cache (used on sign-out / account switch). Also
+    /// drops the sync baseline so the next sign-in rebuilds from a full snapshot,
+    /// and tears down the live connection.
     func wipeCache() {
+        stopLiveSync()
         try? context.delete(model: CachedPaper.self)
         try? context.delete(model: OutboxAction.self)
         try? context.delete(model: ReadingSessionLocal.self)
         try? context.save()
+        AppConfig.clearLibraryVersions()
         syncSummary = nil
         refreshQueues()
         updateWidget()

@@ -18,6 +18,7 @@ enum AppConfig {
     private static let reminderHourKey = "reminderHour"
     private static let reminderMinuteKey = "reminderMinute"
     private static let readExtraTagsKey = "readExtraTags"
+    private static let libraryVersionsKey = "libraryVersions"
 
     /// Extra Zotero tags the user wants applied automatically whenever a paper
     /// is marked read — added on top of PaperQueue's own `pq:read` tag. Optional.
@@ -102,12 +103,38 @@ enum AppConfig {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: dataSourceKey) }
     }
 
+    // MARK: - Incremental sync state
+
+    /// The library's last-seen `Last-Modified-Version`, keyed by library path so
+    /// the web library (`users/<id>`) and the local desktop library (`users/0`)
+    /// track independently — switching data source never reuses a stale version.
+    /// `nil` means "no baseline yet", which forces a full sync.
+    static func libraryVersion(for libraryPath: String) -> Int? {
+        let dict = UserDefaults.standard
+            .dictionary(forKey: libraryVersionsKey) as? [String: Int]
+        return dict?[libraryPath]
+    }
+
+    static func setLibraryVersion(_ version: Int?, for libraryPath: String) {
+        var dict = (UserDefaults.standard
+            .dictionary(forKey: libraryVersionsKey) as? [String: Int]) ?? [:]
+        dict[libraryPath] = version
+        UserDefaults.standard.set(dict, forKey: libraryVersionsKey)
+    }
+
+    /// Drops every stored sync baseline (on sign-out or a cache wipe), so the
+    /// next sync rebuilds the cache from a full snapshot.
+    static func clearLibraryVersions() {
+        UserDefaults.standard.removeObject(forKey: libraryVersionsKey)
+    }
+
     static func clearIdentity() {
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: dataSourceKey)
         UserDefaults.standard.removeObject(forKey: queueNamesKey)
         UserDefaults.standard.removeObject(forKey: activeQueueKey)
+        clearLibraryVersions()
     }
 
     /// Deep link that asks Zotero to open a PDF (or select the item).
