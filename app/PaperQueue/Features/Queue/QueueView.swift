@@ -62,7 +62,7 @@ struct QueueView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar { toolbarContent }
-            .safeAreaInset(edge: .top) { syncProgressBar }
+            .safeAreaInset(edge: .top) { SyncProgressBar() }
             .refreshable { await store.syncLibrary() }
             .navigationDestination(for: QueueRoute.self) { route in
                 switch route {
@@ -117,26 +117,6 @@ struct QueueView: View {
         }
     }
 
-    @ViewBuilder
-    private var syncProgressBar: some View {
-        if store.isSyncing {
-            VStack(spacing: 4) {
-                if let progress = store.syncProgress {
-                    ProgressView(value: progress)
-                } else {
-                    ProgressView(value: 0).progressViewStyle(.linear)
-                }
-                Text(store.syncSummary ?? "Fetching library…")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-            .background(.bar)
-            .transition(.move(edge: .top).combined(with: .opacity))
-        }
-    }
-
     private var list: some View {
         ScrollViewReader { proxy in
             listContent
@@ -175,12 +155,9 @@ struct QueueView: View {
             Spacer(minLength: 8)
             macQueueActions(paper)
         }
-        .contentShape(Rectangle())
-        .listRowBackground(macSelectionBackground(paper))
-        .onTapGesture(count: 2) {
+        .macRowInteraction(selection: $selection, key: paper.zoteroKey) {
             path.append(QueueRoute.detail(paper.zoteroKey))
         }
-        .onTapGesture { selection = paper.zoteroKey }
         .contextMenu { moveMenu(paper) }
         #else
         PaperRowView(
@@ -228,14 +205,9 @@ struct QueueView: View {
     }
 
     #if os(macOS)
-    /// Highlight for the click-selected row (single click selects; double opens).
-    private func macSelectionBackground(_ paper: CachedPaper) -> some View {
-        (selection == paper.zoteroKey ? Theme.accent.opacity(0.14) : Color.clear)
-    }
-
     @ViewBuilder
     private func macQueueActions(_ paper: CachedPaper) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             MacRowButton(icon: "checkmark.circle.fill", tint: .green,
                          help: "Mark read") { store.markRead(paper) }
             MacRowButton(icon: "clock.fill", tint: .orange,

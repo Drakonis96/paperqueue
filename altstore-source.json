@@ -19,6 +19,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "1.5.2",
+          "buildVersion": "9",
+          "date": "2026-06-11",
+          "localizedDescription": "More macOS polish and fixes:\n• Library filters and Collections now open at a proper size — the author/tag/year lists and collection contents load instead of appearing empty.\n• Settings no longer looks cramped; it uses a clean grouped layout.\n• Clicking a paper selects it instantly — the previous selection lag is gone (double-click still opens it).\n• The Library now shows the sync progress bar while refreshing, like the Queue.\n• Bigger, hover-highlighted row action buttons with better spacing.",
+          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.5.2/PaperQueue-unsigned.ipa",
+          "size": 1500000,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.5.1",
           "buildVersion": "8",
           "date": "2026-06-11",

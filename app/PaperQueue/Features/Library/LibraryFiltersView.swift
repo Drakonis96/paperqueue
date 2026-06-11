@@ -70,6 +70,7 @@ struct LibraryFiltersView: View {
                     }
                 }
             }
+            .formStyle(.grouped)
             .navigationTitle("Filters")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -80,6 +81,11 @@ struct LibraryFiltersView: View {
                 }
             }
         }
+        // macOS sheets don't auto-size; without a frame the form (and the lists
+        // pushed from it) collapse and show nothing.
+        #if os(macOS)
+        .frame(minWidth: 460, idealWidth: 500, minHeight: 520, idealHeight: 600)
+        #endif
     }
 
     private func filterLink(

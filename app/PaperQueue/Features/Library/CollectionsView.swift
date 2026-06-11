@@ -49,6 +49,10 @@ struct CollectionsView: View {
             }
             .task { await load() }
         }
+        // macOS sheets don't auto-size; without a frame the list collapses.
+        #if os(macOS)
+        .frame(minWidth: 460, idealWidth: 500, minHeight: 520, idealHeight: 600)
+        #endif
     }
 
     private func load() async {

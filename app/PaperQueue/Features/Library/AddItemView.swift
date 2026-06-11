@@ -48,6 +48,7 @@ struct AddItemView: View {
                     .disabled(isAdding || trimmed.isEmpty)
                 }
             }
+            .formStyle(.grouped)
             .navigationTitle("Add Paper")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -58,6 +59,9 @@ struct AddItemView: View {
                 }
             }
         }
+        #if os(macOS)
+        .frame(minWidth: 440, minHeight: 280)
+        #endif
     }
 
     private func add() async {

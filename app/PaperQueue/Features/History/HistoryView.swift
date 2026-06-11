@@ -80,14 +80,9 @@ struct HistoryView: View {
             MacRowButton(icon: "trash", tint: .secondary,
                          help: "Remove from history") { store.removeFromHistory(paper) }
         }
-        .contentShape(Rectangle())
-        .listRowBackground(
-            selection == paper.zoteroKey
-                ? Theme.accent.opacity(0.14) : Color.clear)
-        .onTapGesture(count: 2) {
+        .macRowInteraction(selection: $selection, key: paper.zoteroKey) {
             path.append(QueueRoute.detail(paper.zoteroKey))
         }
-        .onTapGesture { selection = paper.zoteroKey }
         #else
         NavigationLink(value: QueueRoute.detail(paper.zoteroKey)) {
             PaperRowView(paper: paper, showStatus: true)

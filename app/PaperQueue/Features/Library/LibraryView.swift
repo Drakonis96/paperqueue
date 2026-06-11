@@ -187,6 +187,11 @@ struct LibraryView: View {
             .animation(.easeInOut(duration: 0.3), value: store.isSyncing)
             .navigationTitle("Library")
             .searchable(text: $search, prompt: "Search title, author, journal")
+            .safeAreaInset(edge: .top) {
+                // Show refresh progress over an already-populated list (the
+                // first, empty-state load uses the centered loadingLibrary view).
+                if !papers.isEmpty { SyncProgressBar() }
+            }
             .toolbar { toolbarContent }
             .refreshable { await store.syncLibrary() }
             .navigationDestination(for: QueueRoute.self) { route in
@@ -305,14 +310,9 @@ struct LibraryView: View {
                 .animation(Theme.subtleSpring, value: paper.isPending)
                 .animation(Theme.subtleSpring, value: paper.readStatus)
         }
-        .contentShape(Rectangle())
-        .listRowBackground(
-            selection == paper.zoteroKey
-                ? Theme.accent.opacity(0.14) : Color.clear)
-        .onTapGesture(count: 2) {
+        .macRowInteraction(selection: $selection, key: paper.zoteroKey) {
             path.append(QueueRoute.detail(paper.zoteroKey))
         }
-        .onTapGesture { selection = paper.zoteroKey }
         .contextMenu { addToQueueMenu(paper) }
         #else
         HStack(spacing: 8) {

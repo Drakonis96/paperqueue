@@ -58,6 +58,7 @@ struct SettingsView: View {
                     Text("PaperQueue \(appVersion) · talks directly to Zotero.")
                 }
             }
+            .formStyle(.grouped)
             .navigationTitle("Settings")
             .sheet(isPresented: $showingTagPicker) {
                 ReadTagsPickerView(allTags: allTags, selected: $extraReadTags)
