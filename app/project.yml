@@ -10,8 +10,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.5.2"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "1.6.0"
+    CURRENT_PROJECT_VERSION: "10"
     CODE_SIGN_STYLE: Automatic
     SWIFT_EMIT_LOC_STRINGS: NO
 
@@ -54,6 +54,7 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.files.user-selected.read-only: true
+        com.apple.security.files.downloads.read-write: true
 
   PaperQueueWidget:
     type: app-extension

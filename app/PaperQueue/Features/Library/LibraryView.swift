@@ -55,8 +55,8 @@ enum LibrarySort: String, CaseIterable, Identifiable {
             }
         case .authorAZ:
             return papers.sorted {
-                let a = $0.authors.first ?? "~"
-                let b = $1.authors.first ?? "~"
+                let a = $0.allCreators.first ?? "~"
+                let b = $1.allCreators.first ?? "~"
                 let cmp = a.localizedCaseInsensitiveCompare(b)
                 if cmp == .orderedSame {
                     return $0.title.localizedCaseInsensitiveCompare($1.title)
@@ -106,9 +106,9 @@ struct LibraryView: View {
     @State private var selection: String?
     #endif
 
-    /// Distinct authors across the library, for the author filter.
+    /// Distinct authors and editors across the library, for the author filter.
     private var allAuthors: [String] {
-        Set(papers.flatMap(\.authors))
+        Set(papers.flatMap(\.allCreators))
             .filter { !$0.isEmpty }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
@@ -147,7 +147,9 @@ struct LibraryView: View {
             result = result.filter { $0.collectionKeys?.contains(key) ?? false }
         }
         if !selectedAuthors.isEmpty {
-            result = result.filter { !selectedAuthors.isDisjoint(with: $0.authors) }
+            result = result.filter {
+                !selectedAuthors.isDisjoint(with: Set($0.allCreators))
+            }
         }
         if !selectedTags.isEmpty {
             result = result.filter { !selectedTags.isDisjoint(with: $0.tags) }

@@ -149,11 +149,17 @@ struct CollectionContentsView: View {
     }
 
     private func authorLine(_ item: ZoteroItem) -> String {
-        let names = (item.data.creators ?? []).compactMap { c -> String? in
+        let creators = item.data.creators ?? []
+        func name(_ c: ZoteroCreator) -> String? {
             if let name = c.name { return name }
             if let last = c.lastName { return last }
             return c.firstName
         }
+        // Prefer real authors so editors don't hide them; fall back to all.
+        let authors = creators
+            .filter { $0.creatorType.lowercased() == "author" }
+            .compactMap(name)
+        let names = authors.isEmpty ? creators.compactMap(name) : authors
         if names.isEmpty { return "Unknown author" }
         if names.count <= 2 { return names.joined(separator: ", ") }
         return "\(names[0]) et al."

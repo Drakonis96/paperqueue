@@ -9,6 +9,9 @@ final class CachedPaper {
     var zoteroVersion: Int
     var title: String
     var authors: [String]
+    /// Editor names, kept separate so they're shown as editors (and never hide
+    /// the actual authors). Default `[]` for items synced before 1.6.
+    var editors: [String] = []
     var publicationTitle: String?
     var dateString: String?
     var doi: String?
@@ -41,6 +44,7 @@ final class CachedPaper {
         zoteroVersion: Int,
         title: String,
         authors: [String],
+        editors: [String] = [],
         publicationTitle: String?,
         dateString: String?,
         doi: String?,
@@ -55,6 +59,7 @@ final class CachedPaper {
         self.zoteroVersion = zoteroVersion
         self.title = title
         self.authors = authors
+        self.editors = editors
         self.publicationTitle = publicationTitle
         self.dateString = dateString
         self.doi = doi
@@ -78,10 +83,28 @@ final class CachedPaper {
 
     var hasPdf: Bool { pdfAttachmentKey != nil }
 
+    /// All creators (authors first, then editors) — for the author filter/sort.
+    var allCreators: [String] { authors + editors }
+
+    /// "Last, First" / "First et al." for a name list.
+    private func shortNames(_ names: [String]) -> String {
+        if names.count <= 2 { return names.joined(separator: ", ") }
+        return "\(names[0]) et al."
+    }
+
+    /// Authors and editors, both shown so neither is lost. Editors are labelled
+    /// (e.g. "ed." / "eds.") and never displace the actual authors.
     var authorLine: String {
-        if authors.isEmpty { return "Unknown author" }
-        if authors.count <= 2 { return authors.joined(separator: ", ") }
-        return "\(authors[0]) et al."
+        if !authors.isEmpty {
+            var line = shortNames(authors)
+            if !editors.isEmpty { line += " · ed. \(shortNames(editors))" }
+            return line
+        }
+        if !editors.isEmpty {
+            let label = editors.count > 1 ? "eds." : "ed."
+            return "\(shortNames(editors)) (\(label))"
+        }
+        return "Unknown author"
     }
 
     var year: String? {

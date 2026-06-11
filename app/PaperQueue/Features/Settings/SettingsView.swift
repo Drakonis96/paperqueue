@@ -20,6 +20,10 @@ struct SettingsView: View {
     @State private var extraReadTags: [String] = AppConfig.readExtraTags
     @State private var showingTagPicker = false
 
+    #if os(macOS)
+    @StateObject private var updates = UpdateModel()
+    #endif
+
     private var isLocal: Bool { AppConfig.dataSource == .local }
 
     /// Distinct user tags across the library (excludes pq: state and hidden `_`).
@@ -49,6 +53,10 @@ struct SettingsView: View {
                 readTagsSection
 
                 crossDeviceSyncSection
+
+                #if os(macOS)
+                updatesSection
+                #endif
 
                 Section {
                     Button("Sign out", role: .destructive) {
@@ -202,6 +210,71 @@ struct SettingsView: View {
             Text("When you mark a paper read, these Zotero tags are added alongside PaperQueue's own tag. Optional.")
         }
     }
+
+    #if os(macOS)
+    /// Check GitHub for a newer build and download/open the macOS disk image.
+    @ViewBuilder
+    private var updatesSection: some View {
+        Section {
+            switch updates.phase {
+            case .checking:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking for updates…")
+                }
+            case .downloading:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading update…")
+                }
+            case .installing:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Installing — PaperQueue will relaunch…")
+                }
+            case let .available(release):
+                Label("Update available: \(release.version)",
+                      systemImage: "sparkles")
+                    .foregroundStyle(.green)
+                Button {
+                    Task { await updates.installAndRelaunch(release) }
+                } label: {
+                    Label("Download & Install", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+                Text("Downloads the new version, replaces this app and reopens it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            case .opened:
+                Label("Disk image opened", systemImage: "externaldrive.badge.checkmark")
+                    .foregroundStyle(.green)
+                Text("Couldn't auto-install — drag PaperQueue onto Applications (replacing the old one), then reopen it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            default:
+                Button {
+                    Task { await updates.check() }
+                } label: {
+                    Label("Check for Updates", systemImage: "arrow.down.circle")
+                }
+                if case .upToDate = updates.phase {
+                    Text("You're on the latest version (\(appVersion)).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if case let .failed(message) = updates.phase {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("Checks GitHub for a newer PaperQueue and downloads the macOS disk image to your Downloads. Installing replaces the app in Applications.")
+        }
+    }
+    #endif
 
     /// Lets a Mac running in local mode attach a Zotero web API key so its
     /// queue/read changes sync to other devices (the local API is read-only, so

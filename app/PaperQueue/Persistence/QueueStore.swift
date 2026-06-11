@@ -155,6 +155,7 @@ final class QueueStore: ObservableObject {
             // "Open PDF in Zotero" works without a child lookup.
             let selfPdfKey = (d.itemType == "attachment"
                 && d.contentType == "application/pdf") ? d.key : nil
+            let creators = splitCreators(d.creators)
 
             let paper: CachedPaper
             if let p = byKey[d.key] {
@@ -163,7 +164,7 @@ final class QueueStore: ObservableObject {
                 paper = CachedPaper(
                     zoteroKey: d.key, zoteroVersion: d.version,
                     title: d.title ?? "(untitled)",
-                    authors: authorNames(d.creators),
+                    authors: creators.authors, editors: creators.editors,
                     publicationTitle: d.publicationTitle, dateString: d.date,
                     doi: d.doi, urlString: d.url, tags: tags,
                     pdfAttachmentKey: selfPdfKey, readStatus: "unread",
@@ -175,7 +176,8 @@ final class QueueStore: ObservableObject {
             // Always refresh metadata (but preserve a lazily-resolved PDF key).
             paper.zoteroVersion = d.version
             paper.title = d.title ?? "(untitled)"
-            paper.authors = authorNames(d.creators)
+            paper.authors = creators.authors
+            paper.editors = creators.editors
             paper.publicationTitle = d.publicationTitle
             paper.dateString = d.date
             paper.doi = d.doi
@@ -409,10 +411,11 @@ final class QueueStore: ObservableObject {
         if let existing = try? context.fetch(descriptor).first {
             paper = existing
         } else {
+            let creators = splitCreators(d.creators)
             paper = CachedPaper(
                 zoteroKey: d.key, zoteroVersion: d.version,
                 title: d.title ?? "(untitled)",
-                authors: authorNames(d.creators),
+                authors: creators.authors, editors: creators.editors,
                 publicationTitle: d.publicationTitle, dateString: d.date,
                 doi: d.doi, urlString: d.url, tags: (d.tags ?? []).map(\.tag),
                 pdfAttachmentKey: nil, readStatus: "unread",
@@ -587,14 +590,40 @@ final class QueueStore: ObservableObject {
         return maxPos + Self.posGap
     }
 
-    private func authorNames(_ creators: [ZoteroCreator]?) -> [String] {
-        (creators ?? []).map { c in
-            if let name = c.name { return name }
-            if let last = c.lastName, let first = c.firstName {
-                return "\(last), \(first)"
-            }
-            return c.lastName ?? c.firstName ?? ""
+    private func creatorName(_ c: ZoteroCreator) -> String {
+        if let name = c.name { return name }
+        if let last = c.lastName, let first = c.firstName {
+            return "\(last), \(first)"
         }
+        return c.lastName ?? c.firstName ?? ""
+    }
+
+    /// Splits Zotero creators into authors and editors so both are shown (an
+    /// edited volume often lists editors *before* authors — flattening them hid
+    /// the real authors behind an "editor et al."). Non-author/editor roles
+    /// (translator, etc.) count as authors only when there are no real authors.
+    private func splitCreators(
+        _ creators: [ZoteroCreator]?
+    ) -> (authors: [String], editors: [String]) {
+        var authors: [String] = []
+        var editors: [String] = []
+        var others: [String] = []
+        for c in creators ?? [] {
+            let name = creatorName(c)
+            guard !name.isEmpty else { continue }
+            let type = c.creatorType.lowercased()
+            if type.contains("editor") {
+                editors.append(name)
+            } else if ["author", "bookauthor", "contributor", "presenter",
+                       "podcaster", "interviewee", "director", "inventor",
+                       "cartographer", "programmer"].contains(type) {
+                authors.append(name)
+            } else {
+                others.append(name)
+            }
+        }
+        if authors.isEmpty { authors = others }
+        return (authors, editors)
     }
 
     // MARK: - Widget
