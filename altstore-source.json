@@ -24,7 +24,7 @@
           "date": "2026-06-11",
           "localizedDescription": "• Cross-device reading sync fixed — papers you mark as read on your Mac (or any other device) now show up on iPhone/iPad. Syncs always fetch the current state from Zotero instead of a stale cached copy, so a manual refresh actually picks up reads made elsewhere.\n• Read/queue changes are no longer lost on a flaky connection or a version conflict: a write is retried instead of being silently dropped, and tag updates resolve conflicts automatically.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.8.1/PaperQueue-unsigned.ipa",
-          "size": 1477778,
+          "size": 1477899,
           "minOSVersion": "17.0"
         },
         {
