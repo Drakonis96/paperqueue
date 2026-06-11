@@ -24,7 +24,7 @@
           "date": "2026-06-11",
           "localizedDescription": "More control over your reading queue:\n• Reorder by number — tap a paper's position badge (or use its context menu) and type the exact spot you want it in the queue.\n• Position badges — every paper in the queue now shows its number under the icon.\n• Scroll-to-top button — a floating button appears in the Queue, Library and History to jump straight back to the top of long lists.\n• Custom tags on read — in Settings, pick one or more Zotero tags (searchable, with the option to add a new one) to apply automatically whenever you mark a paper read, on top of PaperQueue's own tag.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.4.0/PaperQueue-unsigned.ipa",
-          "size": 1500000,
+          "size": 1465519,
           "minOSVersion": "17.0"
         },
         {
