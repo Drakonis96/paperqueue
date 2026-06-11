@@ -96,7 +96,13 @@ struct StatsView: View {
     // MARK: - Stats grid
 
     private func statsGrid(_ stats: LocalStats) -> some View {
+        #if os(macOS)
+        // On the wide Mac window two flexible columns stretch each card into a
+        // long rectangle. An adaptive grid of square tiles reads much better.
+        let columns = [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 12)]
+        #else
         let columns = [GridItem(.flexible()), GridItem(.flexible())]
+        #endif
         return LazyVGrid(columns: columns, spacing: 12) {
             StatCard(title: "Read today", value: "\(stats.readToday)",
                      unit: "works", systemImage: "sun.max.fill", tint: .orange)
@@ -262,6 +268,39 @@ private struct StatCard: View {
     let tint: Color
 
     var body: some View {
+        #if os(macOS)
+        // A balanced square tile: icon up top, the value centred, caption below.
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.title2)
+                .foregroundStyle(tint)
+            Spacer(minLength: 0)
+            Text(value)
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .contentTransition(.numericText())
+                .animation(Theme.subtleSpring, value: value)
+            VStack(spacing: 1) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(unit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1, contentMode: .fit)
+        .padding(12)
+        .background(Theme.cardBackground, in: RoundedRectangle(
+            cornerRadius: Theme.cornerRadius))
+        #else
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: systemImage)
                 .font(.caption)
@@ -282,5 +321,6 @@ private struct StatCard: View {
         .padding()
         .background(Theme.cardBackground, in: RoundedRectangle(
             cornerRadius: Theme.cornerRadius))
+        #endif
     }
 }

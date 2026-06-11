@@ -167,9 +167,13 @@ struct QueueView: View {
         .listRowBackground(
             selection == paper.zoteroKey
                 ? Theme.accent.opacity(0.14) : Color.clear)
-        .onTapGesture(count: 2) {
-            path.append(QueueRoute.detail(paper.zoteroKey))
-        }
+        // A plain `.onTapGesture` installs an exclusive recognizer that swallows
+        // the List's drag-to-reorder gesture. `simultaneousGesture` lets the
+        // double-click-to-open coexist with native reordering.
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                path.append(QueueRoute.detail(paper.zoteroKey))
+            })
         .contextMenu { queueContextMenu(paper) }
         #else
         PaperRowView(
