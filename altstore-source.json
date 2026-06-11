@@ -24,7 +24,7 @@
           "date": "2026-06-11",
           "localizedDescription": "• macOS: drag-to-reorder in the Queue now works reliably — the double-click-to-open gesture no longer swallows the reorder drag, so you can grab any row and drag it to a new position.\n• macOS: the Stats screen now lays its metric cards out as a clean grid of square tiles (icon, value and label centred) instead of stretched-out rectangles.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.8.0/PaperQueue-unsigned.ipa",
-          "size": 1480000,
+          "size": 1477778,
           "minOSVersion": "17.0"
         },
         {
