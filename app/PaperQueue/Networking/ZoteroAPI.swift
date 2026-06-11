@@ -224,23 +224,30 @@ struct ZoteroAPI {
     }
 
     func setTags(itemKey: String, tags: [String]) async throws {
-        let (data, response) = try await Self.send(
-            authorized(libURL("items/\(itemKey)")))
-        guard response.statusCode == 200 else {
-            throw APIError.server(status: response.statusCode, message: nil)
-        }
-        let item = try JSONDecoder().decode(ZoteroItem.self, from: data)
+        // Read the item's current version, then PATCH its tags guarded by
+        // If-Unmodified-Since-Version. If another device changed the item in
+        // between, Zotero answers 412 — re-read the fresh version and try once
+        // more so a concurrent edit (e.g. a Mac and a phone writing close
+        // together) doesn't silently drop this write.
+        for attempt in 0...1 {
+            let (data, response) = try await Self.send(
+                authorized(libURL("items/\(itemKey)")))
+            guard response.statusCode == 200 else {
+                throw APIError.server(status: response.statusCode, message: nil)
+            }
+            let item = try JSONDecoder().decode(ZoteroItem.self, from: data)
 
-        var patch = authorized(libURL("items/\(itemKey)"), method: "PATCH")
-        patch.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        patch.setValue(
-            "\(item.data.version)",
-            forHTTPHeaderField: "If-Unmodified-Since-Version")
-        patch.httpBody = try JSONSerialization.data(
-            withJSONObject: ["tags": tags.map { ["tag": $0] }])
+            var patch = authorized(libURL("items/\(itemKey)"), method: "PATCH")
+            patch.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            patch.setValue(
+                "\(item.data.version)",
+                forHTTPHeaderField: "If-Unmodified-Since-Version")
+            patch.httpBody = try JSONSerialization.data(
+                withJSONObject: ["tags": tags.map { ["tag": $0] }])
 
-        let (_, presponse) = try await Self.send(patch)
-        guard presponse.statusCode == 204 else {
+            let (_, presponse) = try await Self.send(patch)
+            if presponse.statusCode == 204 { return }
+            if presponse.statusCode == 412, attempt == 0 { continue }
             throw APIError.server(status: presponse.statusCode, message: nil)
         }
     }
@@ -350,6 +357,11 @@ struct ZoteroAPI {
     private func authorized(_ url: URL, method: String = "GET") -> URLRequest {
         var req = URLRequest(url: url)
         req.httpMethod = method
+        // Always hit Zotero, never URLSession's cache. A sync must reflect the
+        // *current* server state — otherwise a cached response can hide tags
+        // another device just wrote (e.g. a `pq:read` marked on the Mac), so the
+        // library and read state never update even on a manual refresh.
+        req.cachePolicy = .reloadIgnoringLocalCacheData
         req.setValue("3", forHTTPHeaderField: "Zotero-API-Version")
         if let apiKey {
             req.setValue(apiKey, forHTTPHeaderField: "Zotero-API-Key")

@@ -522,7 +522,15 @@ final class QueueStore: ObservableObject {
             } catch let error as APIError where error.isOffline {
                 isOffline = true
                 return
+            } catch let error as APIError where error.isRetryable {
+                // Transient failure (conflict, rate limit, 5xx, network blip).
+                // Keep the action so the write survives and retry on the next
+                // sync — otherwise a read marked on one device would be lost
+                // before it ever reaches Zotero (and the other devices).
+                return
             } catch {
+                // Permanent failure (e.g. item deleted, or the key can't write):
+                // retrying won't help, so drop the action.
                 context.delete(action)
                 try? context.save()
             }

@@ -40,6 +40,23 @@ enum APIError: LocalizedError {
         return false
     }
 
+    /// True for transient failures worth retrying later rather than discarding
+    /// the work: rate limiting (429), request timeout (408), version conflicts
+    /// (412) and 5xx, plus any transport-level blip. A 4xx like 403 (no write
+    /// access) or 404 (item gone) is permanent and shouldn't be retried. Used by
+    /// the outbox so a temporary hiccup doesn't permanently drop a tag write.
+    var isRetryable: Bool {
+        switch self {
+        case let .server(status, _):
+            return status == 408 || status == 412 || status == 429
+                || (500...599).contains(status)
+        case .transport:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// True when the request was explicitly cancelled (e.g. pull-to-refresh
     /// dismissed before the network call finished).
     var isCancelled: Bool {
