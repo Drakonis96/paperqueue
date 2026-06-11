@@ -219,27 +219,31 @@ struct LibraryView: View {
     }
 
     private var list: some View {
-        List {
-            if activeFilterCount > 0 {
-                Section { activeFilterChips }
-            }
-            Section {
-                ForEach(filtered) { paper in
-                    row(paper)
+        ScrollViewReader { proxy in
+            List {
+                if activeFilterCount > 0 {
+                    Section { activeFilterChips }
                 }
-            } header: {
-                HStack {
-                    Text("^[\(filtered.count) item](inflect: true)")
-                    Spacer()
-                    Label(sort.rawValue, systemImage: sort.systemImage)
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .textCase(nil)
+                Section {
+                    TopAnchorRow()
+                    ForEach(filtered) { paper in
+                        row(paper)
+                    }
+                } header: {
+                    HStack {
+                        Text("^[\(filtered.count) item](inflect: true)")
+                        Spacer()
+                        Label(sort.rawValue, systemImage: sort.systemImage)
+                            .labelStyle(.titleAndIcon)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textCase(nil)
+                    }
                 }
             }
+            .animation(.easeInOut(duration: 0.28), value: filtered.map(\.zoteroKey))
+            .scrollTopButton(visible: filtered.count > 7, proxy: proxy)
         }
-        .animation(.easeInOut(duration: 0.28), value: filtered.map(\.zoteroKey))
     }
 
     @ViewBuilder

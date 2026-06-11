@@ -21,12 +21,21 @@ struct QueueView: View {
     @State private var showingNewQueue = false
     @State private var newQueueName = ""
     @State private var showingDeleteQueue = false
+    @State private var movingPaper: CachedPaper?
+    @State private var moveTargetText = ""
+    @State private var showingMovePrompt = false
 
     /// Papers in the currently selected queue.
     private var papers: [CachedPaper] {
         let stored = store.activeQueue == AppConfig.defaultQueueName
             ? nil : store.activeQueue
         return allPending.filter { $0.queueName == stored }
+    }
+
+    /// 1-based position of each paper, for the row badge.
+    private var positions: [String: Int] {
+        Dictionary(uniqueKeysWithValues:
+            papers.enumerated().map { ($0.element.zoteroKey, $0.offset + 1) })
     }
 
     private var showError: Binding<Bool> {
@@ -86,6 +95,16 @@ struct QueueView: View {
             } message: {
                 Text("Its papers move back to the Default queue.")
             }
+            .alert("Move to position", isPresented: $showingMovePrompt) {
+                TextField("Position", text: $moveTargetText)
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                Button("Move") { commitMove() }
+                Button("Cancel", role: .cancel) { cancelMove() }
+            } message: {
+                Text("Enter a position from 1 to \(papers.count).")
+            }
         }
         .onChange(of: router.readerPaperKey) { _, newValue in
             if let key = newValue {
@@ -116,55 +135,76 @@ struct QueueView: View {
     }
 
     private var list: some View {
-        List {
-            Section {
-                ForEach(papers) { paper in
-                    NavigationLink(value: QueueRoute.detail(paper.zoteroKey)) {
-                        PaperRowView(paper: paper)
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    TopAnchorRow()
+                    ForEach(papers) { paper in
+                        queueRow(paper)
                     }
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        Button {
-                            store.markRead(paper)
-                        } label: {
-                            Label("Read", systemImage: "checkmark")
-                        }
-                        .tint(.green)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button {
-                            store.postpone(paper)
-                        } label: {
-                            Label("Later", systemImage: "clock")
-                        }
-                        .tint(.orange)
-
-                        Button(role: .destructive) {
-                            store.skip(paper)
-                        } label: {
-                            Label("Skip", systemImage: "xmark")
-                        }
-
-                        Button {
-                            store.removeFromQueue(paper)
-                        } label: {
-                            Label("Remove", systemImage: "minus.circle")
-                        }
-                        .tint(.gray)
-                    }
-                    .contextMenu { moveMenu(paper) }
+                    .onMove(perform: move)
+                } header: {
+                    Text("\(papers.count) to read · drag or tap the number to reorder")
                 }
-                .onMove(perform: move)
-            } header: {
-                Text("\(papers.count) to read · drag to reorder")
             }
+            #if os(iOS)
+            .listStyle(.insetGrouped)
+            #endif
+            .scrollTopButton(visible: papers.count > 7, proxy: proxy)
         }
-        #if os(iOS)
-        .listStyle(.insetGrouped)
-        #endif
+    }
+
+    private func queueRow(_ paper: CachedPaper) -> some View {
+        PaperRowView(
+            paper: paper,
+            position: positions[paper.zoteroKey],
+            onPositionTap: { beginMove(paper) })
+        .contentShape(Rectangle())
+        .background {
+            NavigationLink(value: QueueRoute.detail(paper.zoteroKey)) {
+                EmptyView()
+            }
+            .opacity(0)
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                store.markRead(paper)
+            } label: {
+                Label("Read", systemImage: "checkmark")
+            }
+            .tint(.green)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                store.postpone(paper)
+            } label: {
+                Label("Later", systemImage: "clock")
+            }
+            .tint(.orange)
+
+            Button(role: .destructive) {
+                store.skip(paper)
+            } label: {
+                Label("Skip", systemImage: "xmark")
+            }
+
+            Button {
+                store.removeFromQueue(paper)
+            } label: {
+                Label("Remove", systemImage: "minus.circle")
+            }
+            .tint(.gray)
+        }
+        .contextMenu { moveMenu(paper) }
     }
 
     @ViewBuilder
     private func moveMenu(_ paper: CachedPaper) -> some View {
+        Button {
+            beginMove(paper)
+        } label: {
+            Label("Move to position…", systemImage: "number")
+        }
         if store.availableQueues.count > 1 {
             Menu("Move to queue", systemImage: "tray.and.arrow.down") {
                 ForEach(store.availableQueues, id: \.self) { queue in
@@ -186,6 +226,35 @@ struct QueueView: View {
         var arr = papers
         arr.move(fromOffsets: from, toOffset: to)
         store.reorderPending(arr)
+    }
+
+    // MARK: - Move to a specific position
+
+    private func beginMove(_ paper: CachedPaper) {
+        movingPaper = paper
+        moveTargetText = "\(positions[paper.zoteroKey] ?? 1)"
+        showingMovePrompt = true
+    }
+
+    private func cancelMove() {
+        movingPaper = nil
+        moveTargetText = ""
+    }
+
+    private func commitMove() {
+        defer { cancelMove() }
+        guard let paper = movingPaper,
+              let target = Int(moveTargetText.trimmingCharacters(
+                  in: .whitespaces))
+        else { return }
+        var arr = papers
+        guard let from = arr.firstIndex(where: {
+            $0.zoteroKey == paper.zoteroKey
+        }) else { return }
+        arr.remove(at: from)
+        let index = min(max(target - 1, 0), arr.count)
+        arr.insert(paper, at: index)
+        withAnimation(Theme.subtleSpring) { store.reorderPending(arr) }
     }
 
     private var emptyState: some View {

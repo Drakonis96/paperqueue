@@ -542,9 +542,11 @@ final class QueueStore: ObservableObject {
         if read {
             tags.append(Self.readTag + ":"
                 + Self.readDateFormatter.string(from: Date()))
+            // User-configured extra tags applied on completion (optional).
+            tags.append(contentsOf: AppConfig.readExtraTags)
         }
         if skipped { tags.append(Self.skipTag) }
-        return tags
+        return tags.uniqued()
     }
 
     private func isRead(_ tags: [String]) -> Bool {

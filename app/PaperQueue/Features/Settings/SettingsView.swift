@@ -1,8 +1,11 @@
+import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var store: QueueStore
+
+    @Query private var papers: [CachedPaper]
 
     @State private var showSignOutConfirm = false
     @State private var syncKey = ""
@@ -14,7 +17,17 @@ struct SettingsView: View {
     @State private var reminderTime: Date = SettingsView.initialReminderTime()
     @State private var notifDenied = false
 
+    @State private var extraReadTags: [String] = AppConfig.readExtraTags
+    @State private var showingTagPicker = false
+
     private var isLocal: Bool { AppConfig.dataSource == .local }
+
+    /// Distinct user tags across the library (excludes pq: state and hidden `_`).
+    private var allTags: [String] {
+        Set(papers.flatMap(\.tags))
+            .filter { !$0.hasPrefix("pq:") && !$0.hasPrefix("_") }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
 
     private let keysURL = URL(string: "https://www.zotero.org/settings/keys/new")!
 
@@ -33,6 +46,8 @@ struct SettingsView: View {
 
                 readingGoalSection
 
+                readTagsSection
+
                 crossDeviceSyncSection
 
                 Section {
@@ -44,6 +59,12 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showingTagPicker) {
+                ReadTagsPickerView(allTags: allTags, selected: $extraReadTags)
+            }
+            .onChange(of: extraReadTags) { _, newValue in
+                AppConfig.readExtraTags = newValue
+            }
             .confirmationDialog(
                 "Sign out of PaperQueue?",
                 isPresented: $showSignOutConfirm,
@@ -139,6 +160,46 @@ struct SettingsView: View {
         comps.hour = AppConfig.reminderHour
         comps.minute = AppConfig.reminderMinute
         return Calendar.current.date(from: comps) ?? Date()
+    }
+
+    /// Optional extra tags applied to a paper when it's marked read.
+    @ViewBuilder
+    private var readTagsSection: some View {
+        Section {
+            if extraReadTags.isEmpty {
+                Button {
+                    showingTagPicker = true
+                } label: {
+                    Label("Add tags on read…", systemImage: "tag")
+                }
+            } else {
+                ForEach(extraReadTags, id: \.self) { tag in
+                    HStack {
+                        Label(tag, systemImage: "tag.fill")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Button {
+                            extraReadTags.removeAll {
+                                $0.caseInsensitiveCompare(tag) == .orderedSame
+                            }
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                Button {
+                    showingTagPicker = true
+                } label: {
+                    Label("Edit tags", systemImage: "tag")
+                }
+            }
+        } header: {
+            Text("Tags on read")
+        } footer: {
+            Text("When you mark a paper read, these Zotero tags are added alongside PaperQueue's own tag. Optional.")
+        }
     }
 
     /// Lets a Mac running in local mode attach a Zotero web API key so its

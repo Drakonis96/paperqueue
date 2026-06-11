@@ -17,6 +17,16 @@ enum AppConfig {
     private static let reminderEnabledKey = "reminderEnabled"
     private static let reminderHourKey = "reminderHour"
     private static let reminderMinuteKey = "reminderMinute"
+    private static let readExtraTagsKey = "readExtraTags"
+
+    /// Extra Zotero tags the user wants applied automatically whenever a paper
+    /// is marked read — added on top of PaperQueue's own `pq:read` tag. Optional.
+    static var readExtraTags: [String] {
+        get { UserDefaults.standard.stringArray(forKey: readExtraTagsKey) ?? [] }
+        set {
+            UserDefaults.standard.set(newValue.uniqued(), forKey: readExtraTagsKey)
+        }
+    }
 
     // MARK: - Reading goal & reminders (gamification)
 

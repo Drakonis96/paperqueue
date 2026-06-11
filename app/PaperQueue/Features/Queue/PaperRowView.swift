@@ -3,14 +3,25 @@ import SwiftUI
 struct PaperRowView: View {
     let paper: CachedPaper
     var showStatus = false
+    /// 1-based position in the reading queue. When set, a numeric badge is
+    /// shown under the icon.
+    var position: Int?
+    /// When provided (with `position`), the badge becomes a button — used to
+    /// jump the paper to a specific position.
+    var onPositionTap: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: paper.hasPdf ? "doc.richtext" : "doc.text")
-                .font(.title3)
-                .foregroundStyle(paper.hasPdf ? Theme.accent : .secondary)
-                .frame(width: 28)
-                .contentTransition(.symbolEffect(.replace))
+            VStack(spacing: 5) {
+                Image(systemName: paper.hasPdf ? "doc.richtext" : "doc.text")
+                    .font(.title3)
+                    .foregroundStyle(paper.hasPdf ? Theme.accent : .secondary)
+                    .contentTransition(.symbolEffect(.replace))
+                if let position {
+                    positionBadge(position)
+                }
+            }
+            .frame(width: 30)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(paper.title)
@@ -34,6 +45,29 @@ struct PaperRowView: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+
+    /// Numeric position pill under the icon. Tappable when `onPositionTap` is
+    /// supplied so the user can move the paper to a chosen position.
+    @ViewBuilder
+    private func positionBadge(_ position: Int) -> some View {
+        let label = Text("\(position)")
+            .font(.caption2.weight(.bold))
+            .monospacedDigit()
+            .foregroundStyle(Theme.accent)
+            .frame(minWidth: 22)
+            .padding(.vertical, 2)
+            .background(Theme.accent.opacity(0.15), in: Capsule())
+            .contentTransition(.numericText())
+            .animation(Theme.subtleSpring, value: position)
+
+        if let onPositionTap {
+            Button(action: onPositionTap) { label }
+                .buttonStyle(PressableButtonStyle())
+                .help("Move to position")
+        } else {
+            label
+        }
     }
 
     @ViewBuilder

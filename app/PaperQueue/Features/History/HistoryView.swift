@@ -46,31 +46,35 @@ struct HistoryView: View {
     }
 
     private var list: some View {
-        List {
-            Section {
-                ForEach(filtered) { paper in
-                    NavigationLink(value: QueueRoute.detail(paper.zoteroKey)) {
-                        PaperRowView(paper: paper, showStatus: true)
-                    }
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        Button {
-                            store.reset(paper)
-                        } label: {
-                            Label("To queue", systemImage: "arrow.uturn.left")
+        ScrollViewReader { proxy in
+            List {
+                Section {
+                    TopAnchorRow()
+                    ForEach(filtered) { paper in
+                        NavigationLink(value: QueueRoute.detail(paper.zoteroKey)) {
+                            PaperRowView(paper: paper, showStatus: true)
                         }
-                        .tint(.blue)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            store.removeFromHistory(paper)
-                        } label: {
-                            Label("Remove", systemImage: "trash")
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                store.reset(paper)
+                            } label: {
+                                Label("To queue", systemImage: "arrow.uturn.left")
+                            }
+                            .tint(.blue)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                store.removeFromHistory(paper)
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
                         }
                     }
+                } header: {
+                    Text("\(filtered.count) read")
                 }
-            } header: {
-                Text("\(filtered.count) read")
             }
+            .scrollTopButton(visible: filtered.count > 7, proxy: proxy)
         }
     }
 }
