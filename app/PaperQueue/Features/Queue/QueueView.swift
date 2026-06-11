@@ -127,8 +127,15 @@ struct QueueView: View {
         }
     }
 
+    @ViewBuilder
     private var listContent: some View {
+        #if os(macOS)
+        // Native selection so single-click selects AND drag-to-reorder works
+        // (a custom tap gesture on the row would swallow the reorder drag).
+        List(selection: $selection) { queueSection }
+        #else
         List { queueSection }
+        #endif
     }
 
     private var queueSection: some View {
@@ -145,8 +152,8 @@ struct QueueView: View {
 
     private func queueRow(_ paper: CachedPaper) -> some View {
         #if os(macOS)
-        // Single click selects; double click opens. Actions are visible buttons
-        // (swipe is awkward with a mouse).
+        // Single click selects (native List selection — keeps drag-to-reorder
+        // working); double click opens. Actions are visible buttons.
         HStack(spacing: 10) {
             PaperRowView(
                 paper: paper,
@@ -155,10 +162,15 @@ struct QueueView: View {
             Spacer(minLength: 8)
             macQueueActions(paper)
         }
-        .macRowInteraction(selection: $selection, key: paper.zoteroKey) {
+        .tag(paper.zoteroKey)
+        .contentShape(Rectangle())
+        .listRowBackground(
+            selection == paper.zoteroKey
+                ? Theme.accent.opacity(0.14) : Color.clear)
+        .onTapGesture(count: 2) {
             path.append(QueueRoute.detail(paper.zoteroKey))
         }
-        .contextMenu { moveMenu(paper) }
+        .contextMenu { queueContextMenu(paper) }
         #else
         PaperRowView(
             paper: paper,
@@ -200,7 +212,7 @@ struct QueueView: View {
             }
             .tint(.gray)
         }
-        .contextMenu { moveMenu(paper) }
+        .contextMenu { queueContextMenu(paper) }
         #endif
     }
 
@@ -220,8 +232,37 @@ struct QueueView: View {
     }
     #endif
 
+    /// Full right-click menu: every queue action (mirroring the visible buttons)
+    /// plus reordering and queue moves.
     @ViewBuilder
-    private func moveMenu(_ paper: CachedPaper) -> some View {
+    private func queueContextMenu(_ paper: CachedPaper) -> some View {
+        Button {
+            path.append(QueueRoute.detail(paper.zoteroKey))
+        } label: {
+            Label("Open", systemImage: "doc.text.magnifyingglass")
+        }
+        Divider()
+        Button {
+            store.markRead(paper)
+        } label: {
+            Label("Mark read", systemImage: "checkmark.circle")
+        }
+        Button {
+            store.postpone(paper)
+        } label: {
+            Label("Read later", systemImage: "clock")
+        }
+        Button {
+            store.skip(paper)
+        } label: {
+            Label("Skip", systemImage: "xmark.circle")
+        }
+        Button(role: .destructive) {
+            store.removeFromQueue(paper)
+        } label: {
+            Label("Remove from queue", systemImage: "minus.circle")
+        }
+        Divider()
         Button {
             beginMove(paper)
         } label: {

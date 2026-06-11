@@ -29,12 +29,15 @@ struct ZoteroItemData: Codable {
     let parentItem: String?
     let contentType: String?
     let collections: [String]?
+    /// Page range, e.g. "134-136" (or abbreviated "134-36"). Used to estimate
+    /// pages read.
+    let pages: String?
 
     enum CodingKeys: String, CodingKey {
         case key, version, itemType, title, creators, abstractNote
         case publicationTitle, date
         case doi = "DOI"
-        case url, tags, dateAdded, parentItem, contentType, collections
+        case url, tags, dateAdded, parentItem, contentType, collections, pages
     }
 }
 

@@ -29,6 +29,7 @@ struct StatsView: View {
                     goal: stats.dailyGoal,
                     firstActiveDay: stats.firstActiveDay)
                 weeklyChart(stats)
+                pagesWeeklyChart(stats)
             }
             .padding()
         }
@@ -98,19 +99,24 @@ struct StatsView: View {
         let columns = [GridItem(.flexible()), GridItem(.flexible())]
         return LazyVGrid(columns: columns, spacing: 12) {
             StatCard(title: "Read today", value: "\(stats.readToday)",
-                     unit: "papers", systemImage: "sun.max.fill", tint: .orange)
+                     unit: "works", systemImage: "sun.max.fill", tint: .orange)
+            StatCard(title: "Pages today", value: "\(stats.pagesToday)",
+                     unit: "pages", systemImage: "book.fill", tint: .orange)
             StatCard(title: "This week", value: "\(stats.readThisWeek)",
-                     unit: "papers", systemImage: "calendar", tint: .blue)
-            StatCard(title: "This month", value: "\(stats.readThisMonth)",
-                     unit: "papers", systemImage: "calendar.badge.clock",
-                     tint: .teal)
+                     unit: "works", systemImage: "calendar", tint: .blue)
+            StatCard(title: "Pages this week", value: "\(stats.pagesThisWeek)",
+                     unit: "pages", systemImage: "calendar", tint: .teal)
             StatCard(title: "Total read", value: "\(stats.papersReadTotal)",
-                     unit: "papers", systemImage: "checkmark.circle.fill",
+                     unit: "works", systemImage: "checkmark.circle.fill",
                      tint: .green)
-            StatCard(title: "Best day", value: "\(stats.bestDayCount)",
-                     unit: "papers", systemImage: "star.fill", tint: .pink)
-            StatCard(title: "Daily average", value: avgText(stats),
-                     unit: "per active day", systemImage: "chart.line.uptrend.xyaxis",
+            StatCard(title: "Total pages", value: "\(stats.pagesReadTotal)",
+                     unit: "pages", systemImage: "doc.text.fill", tint: .green)
+            StatCard(title: "Avg works/day", value: fmt(stats.averagePerActiveDay),
+                     unit: "per active day",
+                     systemImage: "chart.line.uptrend.xyaxis", tint: .indigo)
+            StatCard(title: "Avg pages/day",
+                     value: fmt(stats.averagePagesPerActiveDay),
+                     unit: "per active day", systemImage: "chart.bar.fill",
                      tint: .indigo)
             StatCard(title: "Pending", value: "\(stats.pendingCount)",
                      unit: "to read", systemImage: "tray.full.fill", tint: .purple)
@@ -119,8 +125,8 @@ struct StatsView: View {
         }
     }
 
-    private func avgText(_ stats: LocalStats) -> String {
-        String(format: "%.1f", stats.averagePerActiveDay)
+    private func fmt(_ value: Double) -> String {
+        String(format: "%.1f", value)
     }
 
     // MARK: - Weekly chart
@@ -148,6 +154,30 @@ struct StatsView: View {
                     }
             }
             .frame(height: 200)
+        }
+        .padding()
+        .background(Theme.cardBackground, in: RoundedRectangle(
+            cornerRadius: Theme.cornerRadius))
+    }
+
+    private func pagesWeeklyChart(_ stats: LocalStats) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Pages read per week", systemImage: "book.fill")
+                .font(.headline)
+            Chart {
+                ForEach(stats.perWeek) { bucket in
+                    BarMark(
+                        x: .value("Week", shortLabel(bucket.weekStart)),
+                        y: .value("Pages", bucket.pagesRead)
+                    )
+                    .foregroundStyle(Color.teal.gradient)
+                    .cornerRadius(4)
+                }
+            }
+            .frame(height: 200)
+            Text("Estimated from Zotero page ranges (e.g. 134–136 = 2 pages).")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding()
         .background(Theme.cardBackground, in: RoundedRectangle(

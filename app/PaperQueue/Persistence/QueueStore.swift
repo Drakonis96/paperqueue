@@ -166,7 +166,7 @@ final class QueueStore: ObservableObject {
                     title: d.title ?? "(untitled)",
                     authors: creators.authors, editors: creators.editors,
                     publicationTitle: d.publicationTitle, dateString: d.date,
-                    doi: d.doi, urlString: d.url, tags: tags,
+                    doi: d.doi, urlString: d.url, pages: d.pages, tags: tags,
                     pdfAttachmentKey: selfPdfKey, readStatus: "unread",
                     addedAt: d.dateAdded, sortPriority: 0)
                 context.insert(paper)
@@ -182,6 +182,7 @@ final class QueueStore: ObservableObject {
             paper.dateString = d.date
             paper.doi = d.doi
             paper.urlString = d.url
+            paper.pages = d.pages
             paper.addedAt = d.dateAdded
             paper.collectionKeys = d.collections
             paper.tags = tags
@@ -417,7 +418,8 @@ final class QueueStore: ObservableObject {
                 title: d.title ?? "(untitled)",
                 authors: creators.authors, editors: creators.editors,
                 publicationTitle: d.publicationTitle, dateString: d.date,
-                doi: d.doi, urlString: d.url, tags: (d.tags ?? []).map(\.tag),
+                doi: d.doi, urlString: d.url, pages: d.pages,
+                tags: (d.tags ?? []).map(\.tag),
                 pdfAttachmentKey: nil, readStatus: "unread",
                 addedAt: d.dateAdded, sortPriority: 0)
             context.insert(paper)

@@ -16,6 +16,8 @@ final class CachedPaper {
     var dateString: String?
     var doi: String?
     var urlString: String?
+    /// Zotero page range, e.g. "134-136". Default nil for items synced pre-1.7.
+    var pages: String?
     var tags: [String]
     var pdfAttachmentKey: String?
     /// Zotero collection keys this paper belongs to (for the collection filter).
@@ -49,6 +51,7 @@ final class CachedPaper {
         dateString: String?,
         doi: String?,
         urlString: String?,
+        pages: String? = nil,
         tags: [String],
         pdfAttachmentKey: String?,
         readStatus: String,
@@ -64,6 +67,7 @@ final class CachedPaper {
         self.dateString = dateString
         self.doi = doi
         self.urlString = urlString
+        self.pages = pages
         self.tags = tags
         self.pdfAttachmentKey = pdfAttachmentKey
         self.collectionKeys = nil
@@ -82,6 +86,33 @@ final class CachedPaper {
     }
 
     var hasPdf: Bool { pdfAttachmentKey != nil }
+
+    /// Pages inferred from the Zotero page range (e.g. "134-136" → 2). Handles
+    /// abbreviated ends ("134-36"/"134-6" → 2). Single pages / non-numeric
+    /// values yield nil. Convention: end − start.
+    var pageCount: Int? { CachedPaper.pageCount(from: pages) }
+
+    static func pageCount(from raw: String?) -> Int? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty,
+              let match = raw.range(
+                  of: #"(\d+)\s*[-–—]\s*(\d+)"#, options: .regularExpression)
+        else { return nil }
+        let nums = raw[match]
+            .split(whereSeparator: { !$0.isNumber })
+            .map(String.init)
+        guard nums.count == 2 else { return nil }
+        let startStr = nums[0]
+        var endStr = nums[1]
+        // Expand an abbreviated end ("134-36" → "136") to the start's width.
+        if endStr.count < startStr.count {
+            endStr = String(startStr.prefix(startStr.count - endStr.count)) + endStr
+        }
+        guard let start = Int(startStr), let end = Int(endStr), end > start else {
+            return nil
+        }
+        return end - start
+    }
 
     /// All creators (authors first, then editors) — for the author filter/sort.
     var allCreators: [String] { authors + editors }

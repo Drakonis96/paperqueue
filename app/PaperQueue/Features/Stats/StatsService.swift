@@ -3,6 +3,7 @@ import Foundation
 struct WeekBucket: Identifiable {
     let weekStart: String
     let papersRead: Int
+    let pagesRead: Int
     var id: String { weekStart }
 }
 
@@ -29,6 +30,12 @@ struct LocalStats {
     var bestDayCount: Int
     var activeDaysCount: Int
     var averagePerActiveDay: Double
+    // Pages (estimated from Zotero page ranges).
+    var pagesReadTotal: Int
+    var pagesToday: Int
+    var pagesThisWeek: Int
+    var pagesThisMonth: Int
+    var averagePagesPerActiveDay: Double
     var perWeek: [WeekBucket]
     /// dayKey ("yyyy-MM-dd") -> papers read that day. Drives the calendar.
     var countsByDay: [String: Int]
@@ -92,6 +99,22 @@ enum StatsService {
             if day >= monthStart { readThisMonth += 1 }
         }
 
+        // Pages read (estimated from Zotero page ranges) per day / window / total.
+        var pagesByDay: [String: Int] = [:]
+        var pagesTotal = 0
+        var pagesThisWeek = 0
+        var pagesThisMonth = 0
+        for p in read {
+            guard let pc = p.pageCount else { continue }
+            pagesTotal += pc
+            let date = p.readDate ?? p.updatedAt
+            pagesByDay[dayKey(date), default: 0] += pc
+            let day = c.startOfDay(for: date)
+            if day >= weekStartDate { pagesThisWeek += pc }
+            if day >= monthStart { pagesThisMonth += pc }
+        }
+        let pagesToday = pagesByDay[todayKey] ?? 0
+
         // Earliest day with any reading (anchors the calendar's "tracked" range).
         let firstActiveDay = read
             .map { c.startOfDay(for: $0.readDate ?? $0.updatedAt) }
@@ -137,24 +160,32 @@ enum StatsService {
         let activeDays = counts.count
         let avg = activeDays > 0
             ? Double(read.count) / Double(activeDays) : 0
+        let avgPages = activeDays > 0
+            ? Double(pagesTotal) / Double(activeDays) : 0
 
-        // Per-week papers-read counts for the last `weeks` weeks (bar chart).
+        // Per-week papers + pages for the last `weeks` weeks (bar charts).
         var buckets: [String: Int] = [:]
+        var pageBuckets: [String: Int] = [:]
         var order: [String] = []
         var weekCursor = weekStartDate
         for _ in 0..<weeks {
             let key = dayKey(weekCursor)
             buckets[key] = 0
+            pageBuckets[key] = 0
             order.append(key)
             weekCursor = c.date(byAdding: .day, value: -7, to: weekCursor)
                 ?? weekCursor
         }
         for p in read {
             let key = dayKey(weekStart(p.readDate ?? p.updatedAt))
-            if buckets[key] != nil { buckets[key, default: 0] += 1 }
+            if buckets[key] != nil {
+                buckets[key, default: 0] += 1
+                pageBuckets[key, default: 0] += (p.pageCount ?? 0)
+            }
         }
         let perWeek = order.sorted().map {
-            WeekBucket(weekStart: $0, papersRead: buckets[$0] ?? 0)
+            WeekBucket(weekStart: $0, papersRead: buckets[$0] ?? 0,
+                       pagesRead: pageBuckets[$0] ?? 0)
         }
 
         return LocalStats(
@@ -170,6 +201,11 @@ enum StatsService {
             bestDayCount: bestDay,
             activeDaysCount: activeDays,
             averagePerActiveDay: avg,
+            pagesReadTotal: pagesTotal,
+            pagesToday: pagesToday,
+            pagesThisWeek: pagesThisWeek,
+            pagesThisMonth: pagesThisMonth,
+            averagePagesPerActiveDay: avgPages,
             perWeek: perWeek,
             countsByDay: counts,
             firstActiveDay: firstActiveDay)
