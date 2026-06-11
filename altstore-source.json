@@ -24,7 +24,7 @@
           "date": "2026-06-11",
           "localizedDescription": "• Pages read — Stats now estimates pages from Zotero page ranges (e.g. 134–136 = 2, abbreviated 134–36 too): pages today / this week, total pages, a pages-per-week chart, and averages for both works and pages per active day.\n• macOS: fixed drag-to-reorder in the Queue (a tap gesture was swallowing the drag), and the right-click menu now offers every action — mark read, read later, skip, remove, open, move to position and move to queue — alongside the visible buttons.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.7.0/PaperQueue-unsigned.ipa",
-          "size": 1500000,
+          "size": 1477777,
           "minOSVersion": "17.0"
         },
         {
