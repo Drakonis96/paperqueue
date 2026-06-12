@@ -1699,6 +1699,38 @@ pre.code {
   margin-bottom: 6px;
 }
 
+/* Exclude-by-tag picker (Suggest with AI). */
+.ai-exclude {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.ai-xtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  max-height: 168px;
+  overflow: auto;
+}
+.ai-xtag {
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ai-xtag:hover {
+  border-color: var(--accent);
+}
+.ai-xtag.sel {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* Mobile */
 @media (max-width: 860px) {
   .ai-mini {

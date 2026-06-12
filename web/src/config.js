@@ -93,6 +93,12 @@ export const config = {
     openai: { apiKey: (process.env.OPENAI_API_KEY || "").trim() },
     openrouter: { apiKey: (process.env.OPENROUTER_API_KEY || "").trim() },
     deepseek: { apiKey: (process.env.DEEPSEEK_API_KEY || "").trim() },
+    // Google Gemini via its OpenAI-compatible endpoint. Accepts GEMINI_API_KEY
+    // or GOOGLE_API_KEY (the two names Google uses interchangeably for AI Studio
+    // keys). Create one at https://aistudio.google.com/apikey.
+    gemini: {
+      apiKey: (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim(),
+    },
     custom: {
       name: (process.env.AI_CUSTOM_NAME || "").trim(),
       baseUrl: (process.env.AI_CUSTOM_BASE_URL || "").trim(),

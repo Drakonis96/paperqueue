@@ -10,6 +10,7 @@
 // The browser never holds a provider key — every call goes through the server.
 
 import { authorLine, DEFAULT_QUEUE } from "./store.js";
+import { buildReorderMessages, buildSuggestMessages, filterExcluded } from "./ai-prompt.js";
 
 const SVG = {
   spark:
@@ -58,7 +59,7 @@ function currentModel() {
 }
 
 function providerLabel(id) {
-  return { openai: "OpenAI", openrouter: "OpenRouter", deepseek: "DeepSeek", custom: "Custom" }[id] || id;
+  return { openai: "OpenAI", openrouter: "OpenRouter", deepseek: "DeepSeek", gemini: "Gemini", custom: "Custom" }[id] || id;
 }
 
 function modelSelectorHtml(id = "ai-model-select") {
@@ -193,13 +194,18 @@ async function collectionItems(key, fetching = new Set()) {
       title: d.title || "(untitled)",
       authors: names.slice(0, 3).join(", "),
       year: (String(d.date || "").match(/\d{4}/) || [])[0] || "",
+      // Carry tags so the model can reason about topics and we can apply the
+      // user's tag exclusions before sending anything.
+      tags: (d.tags || []).map((t) => t.tag).filter(Boolean),
     };
   });
+  // Fetch subcollections concurrently rather than one-at-a-time — a deep tree
+  // used to serialise dozens of round-trips, which is what made "Suggest" drag.
   if (subcollections?.length) {
-    for (const sub of subcollections) {
-      const subItems = await collectionItems(sub.key, fetching);
-      mapped.push(...subItems);
-    }
+    const subResults = await Promise.all(
+      subcollections.map((sub) => collectionItems(sub.key, fetching))
+    );
+    for (const subItems of subResults) mapped.push(...subItems);
   }
   collectionsCache.set(key, mapped);
   return mapped;
@@ -355,26 +361,21 @@ export async function orderQueue() {
   const sel = confirmed;
 
   const label = store.activeQueue === DEFAULT_QUEUE ? "reading queue" : `“${store.activeQueue}” queue`;
-  const listText = pending
-    .map((p, i) => `${i + 1}. [${p.key}] ${p.title}${p.authors.length ? ` — ${authorLine(p)}` : ""}${p.year ? ` (${p.year})` : ""}`)
-    .join("\n");
+  const messages = buildReorderMessages({
+    label,
+    papers: pending.map((p) => ({
+      key: p.key,
+      title: p.title,
+      authorLine: p.authors.length || p.editors.length ? authorLine(p) : "",
+      year: p.year || "",
+      tags: p.tags,
+    })),
+  });
 
   const done = busyModal("Ordering queue", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`);
   let raw = "";
   try {
-    raw = await askAi([
-      {
-        role: "system",
-        content:
-          `You are PaperQueue's reading assistant. The user wants to reorder their ${label}.\n\n` +
-          `Current queue (each line is: number. [key] title — authors (year)):\n${listText}\n\n` +
-          `Return ONLY a JSON array containing EXACTLY the keys above in the new reading order. ` +
-          `Group related papers together by topic, method, author lineage, and chronology. ` +
-          `Do not add, remove, or invent keys. Output must be valid JSON inside a markdown code block, like:\n\n` +
-          `\`\`\`json\n["KEY1", "KEY2", "KEY3"]\n\`\`\``,
-      },
-      { role: "user", content: `Order my ${label} so related papers sit together.` },
-    ], { sel });
+    raw = await askAi(messages, { sel });
   } catch (err) {
     done();
     toast(err.message || "Couldn't order queue", "error");
@@ -425,18 +426,36 @@ export async function addSuggestions() {
     return;
   }
 
+  // Loading the full collection list can take a beat on big libraries — show a
+  // spinner immediately so the button never feels frozen.
+  const loading = busyModal("Suggest with AI", "Loading your collections…");
   let roots;
   try {
     ({ roots } = await loadCollections());
   } catch {
+    loading();
     toast("Couldn't load collections", "error");
     return;
   }
+  loading();
 
   const selected = new Set();
-  const body = roots.length
+  const tree = roots.length
     ? renderCollectionTree(roots, 0, selected)
     : `<div class="ai-muted">No collections in this library.</div>`;
+
+  // Optional tag exclusions: any candidate carrying one of these tags is dropped
+  // before it ever reaches the model.
+  const tags = store.libraryTags();
+  const excludeSection = tags.length
+    ? `<div class="ai-exclude">
+         <label class="ai-field-label">Exclude papers tagged (optional)</label>
+         <div class="ai-muted" style="margin:2px 0 8px">Suggestions carrying any selected tag are filtered out.</div>
+         <div class="ai-xtags">${tags
+           .map((t) => `<button type="button" class="ai-xtag" data-xtag="${esc(t)}">${esc(t)}</button>`)
+           .join("")}</div>
+       </div>`
+    : "";
 
   const modal = openPickerModal(
     "Suggest with AI",
@@ -445,76 +464,97 @@ export async function addSuggestions() {
        <label class="ai-field-label">Number of suggestions</label>
        <input type="number" class="ai-count-input" min="1" max="50" value="5" data-ai-count style="width:80px">
      </div>
-     <div class="ai-pick-list">${body}</div>`,
+     <div class="ai-pick-list">${tree}</div>
+     ${excludeSection}`,
     async (root) => {
-      const picked = [...root.querySelectorAll('input[type="checkbox"]:checked')].map((cb) => ({
+      const picked = [...root.querySelectorAll('.ai-pick-list input[type="checkbox"]:checked')].map((cb) => ({
         key: cb.value,
         name: cb.dataset.name,
       }));
       if (!picked.length) {
         toast("Pick at least one collection", "error");
-          return false;
+        return false;
       }
-        const sel = currentModelFrom(root);
-        const countInput = root.querySelector("[data-ai-count]");
+      const sel = currentModelFrom(root);
+      const countInput = root.querySelector("[data-ai-count]");
       const count = Math.max(1, Math.min(50, parseInt(countInput?.value || "5", 10)));
-      await runSuggestions(sel, picked, count);
-        return true;
+      const excludedTags = [...root.querySelectorAll(".ai-xtag.sel")].map((b) => b.dataset.xtag);
+      await runSuggestions(sel, picked, count, excludedTags);
+      return true;
     }
   );
+
+  // Toggle exclusion chips (the picker's own click handler ignores them).
+  modal.addEventListener("click", (e) => {
+    const chip = e.target.closest(".ai-xtag");
+    if (chip) chip.classList.toggle("sel");
+  });
 }
 
-async function runSuggestions(sel, pickedCollections, count) {
-  const queuedKeys = new Set(store.pendingInActiveQueue().map((p) => p.key));
-  const seen = new Set();
-  const contextItems = [];
-  for (const c of pickedCollections) {
-    let items = [];
-    try {
-      items = await collectionItems(c.key);
-    } catch {
-      continue;
-    }
-    for (const it of items) {
-      if (!it.key || seen.has(it.key) || queuedKeys.has(it.key)) continue;
-      seen.add(it.key);
-      contextItems.push(it);
-      if (contextItems.length >= MAX_CONTEXT_ITEMS) break;
-    }
-    if (contextItems.length >= MAX_CONTEXT_ITEMS) break;
-  }
+async function runSuggestions(sel, pickedCollections, count, excludedTags = []) {
+  let close = busyModal("Suggesting papers", "Reading the selected collections…");
 
-  if (!contextItems.length) {
-    toast("No new papers found in the selected collections", "error");
+  // Fetch every picked collection concurrently, then dedupe.
+  let lists;
+  try {
+    lists = await Promise.all(
+      pickedCollections.map((c) => collectionItems(c.key).catch(() => []))
+    );
+  } catch {
+    close();
+    toast("Couldn't read the selected collections", "error");
     return;
   }
 
-  const listText = contextItems
-    .map((it) => `- [${it.key}] ${it.title}${it.authors ? ` — ${it.authors}` : ""}${it.year ? ` (${it.year})` : ""}`)
-    .join("\n");
+  const seen = new Set();
+  let contextItems = [];
+  for (const items of lists) {
+    for (const it of items) {
+      if (!it.key || seen.has(it.key)) continue;
+      seen.add(it.key);
+      // Skip anything the user has already acted on (queued, read or skipped).
+      const known = store.papers.get(it.key);
+      if (known && (known.isPending || known.readStatus === "read" || known.readStatus === "skipped")) {
+        continue;
+      }
+      contextItems.push(it);
+    }
+  }
 
-  const done = busyModal("Suggesting papers", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`);
+  // Honour the user's tag exclusions before anything is sent to the model.
+  contextItems = filterExcluded(contextItems, excludedTags).slice(0, MAX_CONTEXT_ITEMS);
+
+  if (!contextItems.length) {
+    close();
+    toast(
+      excludedTags.length
+        ? "No papers left after applying your tag exclusions"
+        : "No new papers found in the selected collections",
+      "error"
+    );
+    return;
+  }
+
+  // Summarise the current queue (titles + tags) so suggestions complement it.
+  const queueContext = store
+    .pendingInActiveQueue()
+    .slice(0, 40)
+    .map((p) => ({ title: p.title, tags: p.tags }));
+
+  const messages = buildSuggestMessages({ count, candidates: contextItems, queueContext, excludedTags });
+
+  // Swap the spinner message now that we're actually asking the model.
+  close();
+  close = busyModal("Suggesting papers", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`);
   let raw = "";
   try {
-    raw = await askAi([
-      {
-        role: "system",
-        content:
-          `You are PaperQueue's reading assistant. Suggest up to ${count} papers from the Context items below to add to the user's reading queue. ` +
-          `Choose items that complement the current queue. Return ONLY a JSON array of objects with keys \`key\`, \`title\`, and \`reason\`. ` +
-          `Every \`key\` must come from the Context items. Do not include items already in the queue. ` +
-          `Output must be valid JSON inside a markdown code block, like:\n\n` +
-          `\`\`\`json\n[\n  {"key": "KEY1", "title": "Title 1", "reason": "Short reason"}\n]\n\`\`\`\n\n` +
-          `Context items:\n${listText}`,
-      },
-      { role: "user", content: "Recommend papers to add to my reading queue." },
-    ], { sel });
+    raw = await askAi(messages, { sel });
   } catch (err) {
-    done();
+    close();
     toast(err.message || "Couldn't get suggestions", "error");
     return;
   }
-  done();
+  close();
 
   const parsed = extractJson(raw);
   if (!Array.isArray(parsed) || !parsed.length) {

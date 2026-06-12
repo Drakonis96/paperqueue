@@ -98,9 +98,10 @@ const AI_ENV = {
   openai: "OPENAI_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
+  gemini: "GEMINI_API_KEY",
   custom: "AI_CUSTOM_BASE_URL + AI_CUSTOM_API_KEY",
 };
-const AI_LABEL = { openai: "OpenAI", openrouter: "OpenRouter", deepseek: "DeepSeek", custom: "Custom" };
+const AI_LABEL = { openai: "OpenAI", openrouter: "OpenRouter", deepseek: "DeepSeek", gemini: "Gemini", custom: "Custom" };
 
 const ui = {
   tab: "queue",
@@ -154,6 +155,12 @@ async function init() {
     // Live updates: server pushes "changed" → cheap incremental resync.
     api.liveUpdates(() => store.syncLibrary({ silent: true }));
   }
+  // Persist any pending settings change before the tab is hidden/closed so a
+  // quick edit isn't lost to the debounce (the server is the source of truth).
+  window.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") store.flushSettings();
+  });
+  window.addEventListener("pagehide", () => store.flushSettings());
   scheduleReminderCheck();
 }
 
@@ -973,21 +980,31 @@ AI_CUSTOM_API_KEY=ollama</pre>`;
 // a star to mark favourites that show up in the chat's model selector.
 let aiModelsProvider = null;
 let aiModelsAll = [];
+// Per-session cache of each provider's model list so re-opening the picker is
+// instant (the lists rarely change within a session).
+const aiModelsCache = new Map();
 
 async function aiModelsModal(provider) {
   aiModelsProvider = provider;
   ui.aiModelSearch = "";
+  const cached = aiModelsCache.get(provider);
   openModal(
     modalShell(
       `${AI_LABEL[provider] || provider} models`,
       `<div class="search" style="margin-bottom:12px">${I("search", 16)}<input id="ai-model-search" type="text" placeholder="Search models" /></div>
-       <div id="ai-models-body" style="max-height:360px;overflow:auto"><div style="padding:20px;text-align:center;color:var(--text-3)">Loading…</div></div>`,
+       <div id="ai-models-body" style="max-height:360px;overflow:auto">${cached ? "" : '<div style="padding:20px;text-align:center;color:var(--text-3)">Loading…</div>'}</div>`,
       `<button class="btn primary" data-act="closeModal">Done</button>`
     )
   );
+  if (cached) {
+    aiModelsAll = cached;
+    renderAiModelsBody();
+    return;
+  }
   try {
     const { models } = await api.aiModels(provider);
     aiModelsAll = models || [];
+    aiModelsCache.set(provider, aiModelsAll);
     renderAiModelsBody();
   } catch (e) {
     const b = $("#ai-models-body");

@@ -1,7 +1,8 @@
 // Server-side AI provider client. A single OpenAI-compatible client that fronts
-// OpenAI, OpenRouter, DeepSeek and an optional custom endpoint — all four speak
-// the same `/models` + `/chat/completions` (stream + tools) shape, so one client
-// covers them.
+// OpenAI, OpenRouter, DeepSeek, Google Gemini and an optional custom endpoint —
+// they all speak the same `/models` + `/chat/completions` (stream + tools)
+// shape, so one client covers them. Gemini exposes an OpenAI-compatible surface
+// at /v1beta/openai (https://ai.google.dev/gemini-api/docs/openai).
 //
 // SECURITY: provider API keys live ONLY here, read from the server environment
 // (see config.js). They are never sent to the browser and never logged. The
@@ -15,6 +16,7 @@ const BASES = {
   openai: "https://api.openai.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
   deepseek: "https://api.deepseek.com",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
 };
 
 export class AiError extends Error {
@@ -45,6 +47,8 @@ function specFor(id) {
       };
     case "deepseek":
       return { id, label: "DeepSeek", base: BASES.deepseek, apiKey: ai.deepseek.apiKey };
+    case "gemini":
+      return { id, label: "Gemini", base: BASES.gemini, apiKey: ai.gemini.apiKey };
     case "custom":
       return {
         id,
@@ -57,7 +61,16 @@ function specFor(id) {
   }
 }
 
-const PROVIDER_IDS = ["openai", "openrouter", "deepseek", "custom"];
+const PROVIDER_IDS = ["openai", "openrouter", "deepseek", "gemini", "custom"];
+
+/** Normalizes a raw model id from a provider's /models list. Gemini returns ids
+ *  prefixed with `models/` (e.g. "models/gemini-2.5-flash"); its chat endpoint
+ *  takes the bare name, so strip the prefix for a clean, usable id. */
+export function normalizeModelId(providerId, id) {
+  const s = String(id);
+  if (providerId === "gemini") return s.replace(/^models\//, "");
+  return s;
+}
 
 /** A provider is usable only when it has a key (and, for custom, a base URL). */
 function isConfigured(spec) {
@@ -117,7 +130,8 @@ export async function listModels(providerId) {
   const list = Array.isArray(json) ? json : json.data || json.models || [];
   const ids = list
     .map((m) => (typeof m === "string" ? m : m?.id || m?.name))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((id) => normalizeModelId(providerId, id));
   return [...new Set(ids)]
     .sort((a, b) => String(a).toLowerCase().localeCompare(String(b).toLowerCase()))
     .map((id) => ({ id }));

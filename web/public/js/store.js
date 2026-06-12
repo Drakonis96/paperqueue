@@ -33,6 +33,29 @@ function uniq(arr) {
   return arr.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
+// Fresh user settings. These are NOT Zotero tags, so the SERVER (DATA_DIR/
+// settings.json) is their source of truth and they sync across every browser —
+// including a brand-new incognito window — without relying on localStorage.
+function defaultSettings() {
+  return {
+    customQueues: [],
+    activeQueue: DEFAULT_QUEUE,
+    dailyGoal: 1,
+    readExtraTags: [],
+    // AI assistant: favourite provider/model pairs the user picks in Settings,
+    // and the default selection. Keys never live here — only ids.
+    aiFavorites: [], // [{ provider, model }]
+    aiDefault: null, // { provider, model } | null
+  };
+}
+
+/** True when `s` is indistinguishable from a fresh install — used so an empty
+ *  browser (e.g. incognito) never seeds the server with defaults and clobbers
+ *  real settings saved from another device. */
+function isDefaultSettings(s) {
+  return JSON.stringify(s) === JSON.stringify(defaultSettings());
+}
+
 function todayTag() {
   const d = new Date();
   const y = d.getFullYear();
@@ -154,17 +177,9 @@ export class Store {
     this.baselineVersion = null;
     this.config = { connected: false, demo: false, username: null };
 
-    // Persisted user settings (browser-side, like AppConfig / UserDefaults).
-    this.settings = {
-      customQueues: [],
-      activeQueue: DEFAULT_QUEUE,
-      dailyGoal: 1,
-      readExtraTags: [],
-      // AI assistant: favourite provider/model pairs the user picks in Settings,
-      // and the default selection for the chat. Keys never live here — only ids.
-      aiFavorites: [], // [{ provider, model }]
-      aiDefault: null, // { provider, model } | null
-    };
+    // User settings. The server (DATA_DIR/settings.json) is authoritative and
+    // shared across devices; localStorage is only a cache. See loadSettings().
+    this.settings = defaultSettings();
 
     this.pendingWrites = new Set(); // keys with an in-flight tag write
     this.listeners = new Set();
@@ -235,9 +250,15 @@ export class Store {
     try {
       const server = await api.settings();
       if (server && Object.keys(server).length) {
-        this.settings = { ...this.settings, ...server };
+        // Server is the source of truth: adopt it (a fresh incognito window gets
+        // the daily goal, queues, AI favourites… without any localStorage).
+        this.settings = { ...defaultSettings(), ...server };
         this._saveCache(); // mirror into localStorage (persist still gated off)
-      } else {
+      } else if (!isDefaultSettings(this.settings)) {
+        // Server has nothing yet, but THIS browser holds real (non-default)
+        // settings — seed the server from them. We deliberately do NOT seed from
+        // a default/empty browser, so opening incognito can never overwrite the
+        // settings another device already saved.
         await api.saveSettings(this.settings).catch(() => {});
       }
     } catch {
@@ -259,6 +280,27 @@ export class Store {
       () => api.saveSettings(this.settings).catch(() => {}),
       600
     );
+  }
+
+  /** Flushes any pending settings write immediately (e.g. on tab hide/close so a
+   *  quick edit isn't lost to the debounce). Uses a keepalive request so it still
+   *  lands while the page is unloading. Safe to call any time. */
+  flushSettings() {
+    if (!this._settingsReady) return;
+    const json = JSON.stringify(this.settings);
+    if (json === this._lastPersistedSettings) return; // nothing new to push
+    clearTimeout(this._persistTimer);
+    this._lastPersistedSettings = json;
+    try {
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: json,
+        keepalive: true,
+      });
+    } catch {
+      /* best effort */
+    }
   }
 
   // -- Queues ----------------------------------------------------------------
@@ -756,6 +798,17 @@ export class Store {
   }
   allPapers() {
     return [...this.papers.values()];
+  }
+  /** Every user tag in the library (excludes PaperQueue's `pq:` state tags),
+   *  sorted case-insensitively. Used by the AI "exclude tags" picker. */
+  libraryTags() {
+    const set = new Set();
+    for (const p of this.papers.values()) {
+      for (const t of p.tags) if (!t.startsWith("pq:")) set.add(t);
+    }
+    return [...set].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
   }
   history() {
     return [...this.papers.values()]

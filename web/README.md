@@ -94,6 +94,7 @@ to the browser and never logged.
 | `OPENAI_API_KEY`     | Enables OpenAI.                                                    |
 | `OPENROUTER_API_KEY` | Enables OpenRouter (300+ models through one key).                 |
 | `DEEPSEEK_API_KEY`   | Enables DeepSeek.                                                  |
+| `GEMINI_API_KEY`     | Enables Google Gemini ([AI Studio key](https://aistudio.google.com/apikey); `GOOGLE_API_KEY` also works). |
 | `AI_CUSTOM_NAME`     | Label for a custom OpenAI-compatible provider (e.g. `Ollama`).    |
 | `AI_CUSTOM_BASE_URL` | Base URL for it, e.g. `http://localhost:11434/v1`.                |
 | `AI_CUSTOM_API_KEY`  | Key for it (use any non-empty value for keyless local servers).  |
@@ -122,9 +123,9 @@ Every AI change is **confirmed before it happens and can be undone**.
 - **Stats** — daily goal ring, reading streaks, a month-grid calendar (with
   month navigation and today highlighted), and per-week papers and pages charts.
 - **Add by DOI** — fetches metadata from Crossref and adds it to Zotero.
-- **AI assistant** *(optional)* — a floating chat (OpenAI / OpenRouter / DeepSeek
-  or any OpenAI-compatible endpoint) that suggests papers for your queue from
-  context collections and reorders the queue by affinity. Always confirmed,
+- **AI assistant** *(optional)* — suggests papers for your queue from context
+  collections and reorders the queue by affinity, with OpenAI, OpenRouter,
+  DeepSeek, Google Gemini or any OpenAI-compatible endpoint. Always confirmed,
   always undoable; provider keys stay on the server. See
   [Configuration → AI assistant](#ai-assistant-optional).
 - **Live sync** — the server keeps a WebSocket to Zotero and pushes changes to
