@@ -497,6 +497,22 @@ a {
   cursor: grab;
 }
 
+.row-check {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.sel-bar {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  gap: 10px;
+}
+
 .status-chip {
   font-size: 11px;
   font-weight: 700;

@@ -90,6 +90,8 @@ function toast(message, kind = "") {
 const store = new Store();
 const ui = {
   tab: "queue",
+  // Queue
+  queueSearch: "",
   // Library
   search: "",
   filter: "all", // all | queue | unread | read
@@ -103,6 +105,7 @@ const ui = {
   historyRange: "all", // all | today | week | month | year | custom
   historyFrom: "", // YYYY-MM-DD (custom range)
   historyTo: "",
+  historySelected: new Set(), // keys of selected papers for bulk tag ops
   // Stats calendar: first day of the displayed month (defaults to this month).
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
 };
@@ -286,7 +289,7 @@ function view() {
 // ---------------------------------------------------------------------------
 // Paper row
 // ---------------------------------------------------------------------------
-function paperRow(p, { position, actions = "", draggable = false, showStatus = false, meta = null } = {}) {
+function paperRow(p, { position, actions = "", draggable = false, showStatus = false, meta = null, metaIcon = null } = {}) {
   const pdf = p.pdfAttachmentKey ? "pdf" : "";
   const posBadge =
     position != null
@@ -312,7 +315,7 @@ function paperRow(p, { position, actions = "", draggable = false, showStatus = f
       <div class="title">${esc(p.title)}</div>
       <div class="meta">${esc(authorLine(p))}</div>
       ${sub ? `<div class="meta2">${esc(sub)}</div>` : ""}
-      ${meta ? `<div class="meta2 read-meta">${I("clock", 12)} ${esc(meta)}</div>` : ""}
+      ${meta ? `<div class="meta2 read-meta">${metaIcon ? I(metaIcon, 12) : ""} ${esc(meta)}</div>` : ""}
     </div>
     <div class="actions">${statusBadge}${actions}</div>
   </div>`;
@@ -322,16 +325,27 @@ function paperRow(p, { position, actions = "", draggable = false, showStatus = f
 // Queue view
 // ---------------------------------------------------------------------------
 function queueView() {
-  const papers = store.pendingInActiveQueue();
+  let papers = store.pendingInActiveQueue();
+  const isPostponed = store.activeQueue === POSTPONED_QUEUE;
+
+  if (ui.queueSearch) {
+    const q = ui.queueSearch.toLowerCase();
+    papers = papers.filter(
+      (p) => p.title.toLowerCase().includes(q) || authorLine(p).toLowerCase().includes(q)
+    );
+  }
+
   const queueSelector = `
     <div class="toolbar">
       <button class="select" data-act="queueMenu" style="display:inline-flex;align-items:center;gap:8px">
         ${I("layers", 16)} ${esc(store.activeQueue)} ${I("chevron", 14)}
       </button>
+      <div class="search" style="max-width:300px">
+        ${I("search", 17)}
+        <input id="queue-search" type="text" placeholder="Search queue" value="${attr(ui.queueSearch)}" />
+      </div>
       <div class="spacer" style="flex:1"></div>
     </div>`;
-
-  const isPostponed = store.activeQueue === POSTPONED_QUEUE;
 
   if (!papers.length) {
     if (isPostponed) {
@@ -357,6 +371,7 @@ function queueView() {
       paperRow(p, {
         position: i + 1,
         draggable: true,
+        meta: p.pages ? `${p.pages}${p.pageCount ? ` (${p.pageCount} pp)` : ""}` : null,
         actions: isPostponed
           ? `
           <button class="act green" data-act="markRead:${p.key}" title="Mark read">${I("check", 18)}</button>
@@ -509,7 +524,7 @@ function libraryView() {
   }
 
   const rows = filtered
-    .map((p) => paperRow(p, { showStatus: true, actions: libraryAction(p) }))
+    .map((p) => paperRow(p, { showStatus: true, actions: libraryAction(p) + `<button class="act" data-act="manageLibTags:${p.key}" title="Edit tags">${I("tag", 17)}</button>` }))
     .join("");
 
   return (
@@ -527,7 +542,10 @@ function libraryAction(p) {
     return `<button class="act" data-act="reset:${p.key}" title="Back to queue">${I("uturn", 18)}</button>`;
   if (p.isPending)
     return `<button class="act green" data-act="markRead:${p.key}" title="Mark read">${I("check", 18)}</button>`;
-  return `<button class="act accent" data-act="${store.availableQueues.length > 1 ? "addQueueTo" : "addQueue"}:${p.key}" title="Add to queue">${I("plusCircle", 20)}</button>`;
+  return `
+    <button class="act accent" data-act="addQueue:${p.key}" title="Add to reading queue">${I("plusCircle", 20)}</button>
+    <button class="act orange" data-act="addPostponed:${p.key}" title="Add to postponed">${I("clock", 18)}</button>
+    ${store.availableQueues.length > 1 ? `<button class="act" data-act="addQueueTo:${p.key}" title="Add to specific queue">${I("layers", 16)}</button>` : ""}`;
 }
 
 function chip(type, value, label) {
@@ -594,16 +612,29 @@ function historyView() {
         </div>`
       : "";
 
+  const selCount = ui.historySelected.size;
+  const selBar = selCount > 0
+    ? `<div class="toolbar sel-bar">
+        <span style="font-weight:700;font-size:13px">${selCount} selected</span>
+        <button class="btn sm" data-act="bulkAddTags">${I("tag", 14)} Add tags</button>
+        <button class="btn sm" data-act="bulkRemoveTags">${I("tag", 14)} Remove tags</button>
+        <button class="btn sm" data-act="clearHistorySel">Clear selection</button>
+      </div>`
+    : "";
+
   const rows = papers
-    .map((p) =>
-      paperRow(p, {
+    .map((p) => {
+      const checked = ui.historySelected.has(p.key) ? "checked" : "";
+      return paperRow(p, {
         showStatus: true,
         meta: p.readDate ? `Read ${formatReadDate(p.readDate)}` : null,
+        metaIcon: "clock",
         actions: `
+          <input type="checkbox" class="row-check" data-act="toggleHistSel:${p.key}" ${checked} title="Select for tag operations" />
           <button class="act" data-act="reset:${p.key}" title="Send back to queue">${I("uturn", 18)}</button>
           <button class="act red" data-act="removeHistory:${p.key}" title="Remove from history">${I("trash", 18)}</button>`,
-      })
-    )
+      });
+    })
     .join("");
 
   return `
@@ -616,6 +647,7 @@ function historyView() {
       </select>
     </div>
     ${customRow}
+    ${selBar}
     <div class="list">
       <div class="list-head"><span>${papers.length} read${rangeActive ? ` · ${esc(HISTORY_RANGES[ui.historyRange])}` : ""}</span></div>
       ${rows || `<div class="empty"><p>No reads match your filters.</p></div>`}
@@ -1028,7 +1060,9 @@ async function detailModal(key) {
       <button class="btn danger" data-act="remove:${p.key}" data-close>${I("minusCircle", 16)} Remove from queue</button>`;
   } else {
     actions = `
-      <button class="btn primary" data-act="${store.availableQueues.length > 1 ? "addQueueTo" : "addQueue"}:${p.key}">${I("plusCircle", 16)} Add to reading queue</button>
+      <button class="btn primary" data-act="addQueue:${p.key}" data-close>${I("plusCircle", 16)} Add to reading queue</button>
+      <button class="btn" data-act="addPostponed:${p.key}" data-close>${I("clock", 16)} Add to postponed</button>
+      ${store.availableQueues.length > 1 ? `<button class="btn" data-act="addQueueTo:${p.key}">${I("layers", 16)} Add to specific queue</button>` : ""}
       <button class="btn" data-act="markRead:${p.key}" data-close>${I("check", 16)} Mark as read</button>`;
   }
 
@@ -1065,6 +1099,65 @@ function tagPickerModal() {
   );
 }
 
+/** Shows a tag picker for a single paper (from Library). */
+function tagEditModal(key) {
+  const p = store.papers.get(key);
+  if (!p) return;
+  const paperTags = new Set(p.tags.filter((t) => !t.startsWith("pq:") && !t.startsWith("_")));
+  const allTags = uniqueSorted(
+    store.allPapers().flatMap((p2) => p2.tags).filter((t) => !t.startsWith("pq:") && !t.startsWith("_"))
+  );
+
+  openModal(
+    modalShell(
+      "Edit tags",
+      `<p style="font-size:13px;color:var(--text-2);margin:0 0 12px">${esc(p.title)}</p>
+       <div class="field"><label>Add new tag</label>
+         <div style="display:flex;gap:8px">
+           <input id="new-tag-input" type="text" placeholder="Tag name" style="flex:1" />
+           <button class="btn sm primary" data-act="addNewTag:${key}">Add</button>
+         </div>
+       </div>
+       <div style="max-height:260px;overflow:auto;margin-top:12px">${
+         allTags.length
+           ? allTags.map((t) => `<button class="tag-pill ${paperTags.has(t) ? "sel" : ""}" data-act="togglePaperTag:${key}:${attr(t)}">${esc(t)}</button>`).join("")
+           : `<span style="color:var(--text-3)">No tags yet. Type one above.</span>`
+       }</div>`,
+      `<button class="btn sm danger" data-act="removeAllLibTags:${key}" ${paperTags.size ? "" : "disabled"}>Remove all</button><span class="spacer" style="flex:1"></span><button class="btn primary" data-act="closeModal">Done</button>`
+    )
+  );
+  setTimeout(() => $("#new-tag-input")?.focus(), 50);
+}
+
+/** Shows a tag picker for bulk add/remove on selected history papers. */
+function bulkTagModal(mode) {
+  const papers = [...ui.historySelected].map((k) => store.papers.get(k)).filter(Boolean);
+  if (!papers.length) return;
+  const allTags = uniqueSorted(
+    store.allPapers().flatMap((p) => p.tags).filter((t) => !t.startsWith("pq:") && !t.startsWith("_"))
+  );
+
+  openModal(
+    modalShell(
+      mode === "add" ? "Add tags to selection" : "Remove tags from selection",
+      `<p style="font-size:13px;color:var(--text-2);margin:0 0 12px">${papers.length} ${papers.length === 1 ? "paper" : "papers"} selected</p>
+       <div class="field"><label>${mode === "add" ? "Add new tag" : "Remove tag by name"}</label>
+         <div style="display:flex;gap:8px">
+           <input id="bulk-tag-input" type="text" placeholder="Tag name" style="flex:1" />
+           <button class="btn sm primary" data-act="bulkApplyTag:${mode}">${mode === "add" ? "Add" : "Remove"}</button>
+         </div>
+       </div>
+       <div style="max-height:260px;overflow:auto;margin-top:12px">${
+         allTags.length
+           ? allTags.map((t) => `<button class="tag-pill" data-act="bulkApplyTag:${mode}:${attr(t)}">${esc(t)}</button>`).join("")
+           : `<span style="color:var(--text-3)">No tags yet. Type one above.</span>`
+       }</div>`,
+      `<button class="btn primary" data-act="closeModal">Done</button>`
+    )
+  );
+  setTimeout(() => $("#bulk-tag-input")?.focus(), 50);
+}
+
 function uniqueSorted(arr) {
   return [...new Set(arr.filter(Boolean))].sort((a, b) =>
     String(a).localeCompare(String(b), undefined, { sensitivity: "base" })
@@ -1092,6 +1185,9 @@ document.addEventListener("input", (e) => {
   const id = e.target.id;
   if (id === "lib-search") {
     ui.search = e.target.value;
+    scheduleRender();
+  } else if (id === "queue-search") {
+    ui.queueSearch = e.target.value;
     scheduleRender();
   } else if (id === "hist-search") {
     ui.historySearch = e.target.value;
@@ -1222,6 +1318,12 @@ function handleAction(act, target) {
         toast("Postponed to tomorrow");
       }
       return;
+    case "addPostponed":
+      if (p) {
+        store.postpone(p);
+        toast("Added to postponed", "success");
+      }
+      return;
     case "skip":
       if (p) store.skip(p);
       return;
@@ -1263,6 +1365,56 @@ function handleAction(act, target) {
       const q = decodeArg(rest.slice(1));
       if (p) store.moveToQueue(p, q);
       return closeModal();
+    }
+    case "manageLibTags":
+      if (p) tagEditModal(p.key);
+      return;
+    case "toggleHistSel":
+      if (ui.historySelected.has(key)) ui.historySelected.delete(key);
+      else ui.historySelected.add(key);
+      return scheduleRender();
+    case "clearHistorySel":
+      ui.historySelected.clear();
+      return scheduleRender();
+    case "bulkAddTags":
+      return bulkTagModal("add");
+    case "bulkRemoveTags":
+      return bulkTagModal("remove");
+    case "togglePaperTag": {
+      const tag = decodeArg(rest.slice(1));
+      if (!p) return;
+      const hasTag = p.tags.includes(tag);
+      if (hasTag) store.removeTags(p, [tag]);
+      else store.addTags(p, [tag]);
+      setTimeout(() => tagEditModal(key), 200);
+      return;
+    }
+    case "addNewTag": {
+      if (!p) return;
+      const input = $("#new-tag-input");
+      const tag = input?.value?.trim();
+      if (!tag) return;
+      store.addTags(p, [tag]);
+      setTimeout(() => tagEditModal(key), 200);
+      return;
+    }
+    case "removeAllLibTags": {
+      if (!p) return;
+      const nonPq = p.tags.filter((t) => !t.startsWith("pq:"));
+      if (nonPq.length) store.removeTags(p, nonPq);
+      setTimeout(() => closeModal(), 200);
+      return;
+    }
+    case "bulkApplyTag": {
+      const mode = rest[0];
+      const tag = rest.length > 1 ? decodeArg(rest.slice(1)) : $("#bulk-tag-input")?.value?.trim();
+      if (!tag) return;
+      const papers = [...ui.historySelected].map((k) => store.papers.get(k)).filter(Boolean);
+      if (!papers.length) return;
+      if (mode === "add") store.bulkAddTags(papers, [tag]);
+      else store.bulkRemoveTags(papers, [tag]);
+      setTimeout(() => bulkTagModal(mode), 200);
+      return;
     }
     case "movePos":
       return movePosModal(key);

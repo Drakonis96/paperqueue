@@ -547,6 +547,41 @@ export class Store {
     this.addToQueue(paper, DEFAULT_QUEUE);
   }
 
+  /** Sets the full tag list for a paper and persists to Zotero. */
+  async setTags(paper, tags) {
+    const cleaned = uniq(tags.filter((t) => !t.startsWith("pq:")));
+    // Preserve pq: tags from current state.
+    const pqTags = paper.tags.filter((t) => t.startsWith("pq:"));
+    paper.tags = [...pqTags, ...cleaned];
+    this._saveCache();
+    this.notify();
+    await this._writeTags(paper.key, paper.tags);
+  }
+
+  /** Adds one or more tags to a paper (skipping pq: tags). */
+  async addTags(paper, tags) {
+    const existing = new Set(paper.tags.filter((t) => !t.startsWith("pq:")));
+    for (const t of tags) existing.add(t);
+    await this.setTags(paper, [...existing]);
+  }
+
+  /** Removes one or more tags from a paper (never touches pq: tags). */
+  async removeTags(paper, tags) {
+    const remove = new Set(tags);
+    const kept = paper.tags.filter((t) => !t.startsWith("pq:") && !remove.has(t));
+    await this.setTags(paper, kept);
+  }
+
+  /** Adds tags to multiple papers at once. */
+  async bulkAddTags(papers, tags) {
+    for (const p of papers) await this.addTags(p, tags);
+  }
+
+  /** Removes tags from multiple papers at once. */
+  async bulkRemoveTags(papers, tags) {
+    for (const p of papers) await this.removeTags(p, tags);
+  }
+
   reorderPending(ordered) {
     const writes = [];
     ordered.forEach((paper, index) => {
