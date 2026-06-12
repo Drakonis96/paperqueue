@@ -6,6 +6,7 @@
 import { Store, authorLine, subtitle, POSTPONED_QUEUE } from "./store.js";
 import { computeStats, dayStatus, dayKey, startOfDay } from "./stats.js";
 import { api } from "./api.js";
+import { initAi } from "./ai.js";
 
 // ---------------------------------------------------------------------------
 // Icons (Feather-style, stroke = currentColor)
@@ -50,6 +51,8 @@ const ICONS = {
   cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/>',
   layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
   sun: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="18.4" y1="18.4" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="5.6" y2="18.4"/><line x1="18.4" y1="5.6" x2="19.8" y2="4.2"/>',
+  sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
 };
 
 function I(name, size = 20) {
@@ -88,6 +91,17 @@ function toast(message, kind = "") {
 // App state
 // ---------------------------------------------------------------------------
 const store = new Store();
+let ai = null; // AI assistant controller (initialised in init())
+
+// AI provider env-var names + labels (mirrors web/src/ai.js).
+const AI_ENV = {
+  openai: "OPENAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  custom: "AI_CUSTOM_BASE_URL + AI_CUSTOM_API_KEY",
+};
+const AI_LABEL = { openai: "OpenAI", openrouter: "OpenRouter", deepseek: "DeepSeek", custom: "Custom" };
+
 const ui = {
   tab: "queue",
   // Queue
@@ -101,6 +115,7 @@ const ui = {
   tags: new Set(),
   years: new Set(),
   collections: [], // cached flat list
+  aiProviders: [], // cached /api/ai/config providers
   historySearch: "",
   historyRange: "all", // all | today | week | month | year | custom
   historyFrom: "", // YYYY-MM-DD (custom range)
@@ -126,15 +141,27 @@ init();
 async function init() {
   await store.loadConfig();
   store.subscribe(scheduleRender);
+  ai = initAi({ store, api, toast });
   render();
 
   if (store.config.connected) {
     await store.syncLibrary({ silent: store.papers.size > 0 });
     loadCollections();
+    loadAiProviders();
     // Live updates: server pushes "changed" → cheap incremental resync.
     api.liveUpdates(() => store.syncLibrary({ silent: true }));
   }
   scheduleReminderCheck();
+}
+
+async function loadAiProviders() {
+  try {
+    const r = await api.aiConfig();
+    ui.aiProviders = r.providers || [];
+    scheduleRender();
+  } catch {
+    /* non-fatal */
+  }
 }
 
 async function loadCollections() {
@@ -335,6 +362,10 @@ function queueView() {
     );
   }
 
+  const canOrderAI = store.config.ai && store.pendingInActiveQueue().length >= 2;
+  const orderAIBtn = canOrderAI
+    ? `<button class="btn ai-order-btn" data-act="orderAI" title="Let the assistant group related papers">${I("sparkle", 16)} Order with AI</button>`
+    : "";
   const queueSelector = `
     <div class="toolbar">
       <button class="select" data-act="queueMenu" style="display:inline-flex;align-items:center;gap:8px">
@@ -345,6 +376,7 @@ function queueView() {
         <input id="queue-search" type="text" placeholder="Search queue" value="${attr(ui.queueSearch)}" />
       </div>
       <div class="spacer" style="flex:1"></div>
+      ${orderAIBtn}
     </div>`;
 
   if (!papers.length) {
@@ -846,7 +878,132 @@ function settingsView() {
       </div>
     </div>`;
 
-  return account + goalSection + tagSection + how;
+  return account + goalSection + aiSettingsSection() + tagSection + how;
+}
+
+function aiSettingsSection() {
+  const providers = ui.aiProviders;
+  const favs = store.settings.aiFavorites;
+  const def = store.settings.aiDefault;
+
+  // If the server reports no AI providers configured, show setup guidance.
+  const anyConfigured = providers.some((p) => p.configured);
+
+  const providerRows =
+    providers.length
+      ? providers
+          .map((p) => {
+            const envVar = AI_ENV[p.id] || "";
+            return `<div class="settings-row">
+              <div style="color:${p.configured ? "var(--accent)" : "var(--text-3)"}">${I("layers", 18)}</div>
+              <div class="grow">
+                <div style="font-weight:600">${esc(p.label)}</div>
+                <div style="font-size:12.5px;color:var(--text-3)">${
+                  p.configured ? "Configured on the server" : `Not configured — set ${esc(envVar)}`
+                }</div>
+              </div>
+              ${
+                p.configured
+                  ? `<button class="btn sm" data-act="aiModels:${p.id}">${I("search", 15)} Load models</button>`
+                  : `<span class="status-chip skipped">Off</span>`
+              }
+            </div>`;
+          })
+          .join("")
+      : `<div style="font-size:13px;color:var(--text-3)">Checking providers…</div>`;
+
+  const favList = favs.length
+    ? favs
+        .map(
+          (f) =>
+            `<span class="tag-pill sel">${I("star", 12)} ${esc(AI_LABEL[f.provider] || f.provider)} · ${esc(f.model)} <button data-act="aiUnfav:${f.provider}:${encodeURIComponent(f.model)}" style="border:none;background:none;color:inherit;cursor:pointer;padding:0">${I("x", 12)}</button></span>`
+        )
+        .join("")
+    : `<span style="font-size:13px;color:var(--text-3)">No favourite models yet. Load a provider's models and star the ones you want in the chat.</span>`;
+
+  const defaultSelect = favs.length
+    ? `<div class="settings-row">
+        <div style="color:var(--accent)">${I("sparkle", 18)}</div>
+        <div class="grow"><div style="font-weight:600">Default model</div><div style="font-size:12.5px;color:var(--text-3)">Used when you open the chat.</div></div>
+        <select class="select" id="ai-default">
+          ${favs
+            .map((f) => {
+              const v = `${f.provider}::${f.model}`;
+              const sel = def && def.provider === f.provider && def.model === f.model ? "selected" : "";
+              return `<option value="${attr(v)}" ${sel}>${esc(AI_LABEL[f.provider] || f.provider)} · ${esc(f.model)}</option>`;
+            })
+            .join("")}
+        </select>
+      </div>`
+    : "";
+
+  const intro = anyConfigured
+    ? `<div style="font-size:13px;color:var(--text-2);margin-bottom:10px">Chat with the model of your choice to suggest papers for your queue or reorder it. Provider keys stay on the server — they're never sent to your browser.</div>`
+    : `<div style="font-size:13px;color:var(--text-2);margin-bottom:10px">No AI provider is configured. Add a key on the server (env var or docker-compose) and restart — keys never reach the browser.</div>
+       <pre class="code"># .env
+OPENAI_API_KEY=sk-...
+OPENROUTER_API_KEY=sk-or-...
+DEEPSEEK_API_KEY=sk-...
+# Or any OpenAI-compatible endpoint:
+AI_CUSTOM_NAME=Ollama
+AI_CUSTOM_BASE_URL=http://localhost:11434/v1
+AI_CUSTOM_API_KEY=ollama</pre>`;
+
+  return `
+    <div class="card settings-section">
+      <h3>${I("sparkle", 17)} AI assistant</h3>
+      ${intro}
+      ${providerRows}
+      ${
+        anyConfigured
+          ? `<div style="margin-top:16px"><div style="font-weight:650;font-size:13px;margin-bottom:8px">Favourite models ${favs.length ? `<span style="color:var(--accent)">(${favs.length})</span>` : ""}</div><div>${favList}</div></div>${defaultSelect}`
+          : ""
+      }
+    </div>`;
+}
+
+// Model picker modal — lists every model a provider exposes (alphabetical) with
+// a star to mark favourites that show up in the chat's model selector.
+let aiModelsProvider = null;
+let aiModelsAll = [];
+
+async function aiModelsModal(provider) {
+  aiModelsProvider = provider;
+  ui.aiModelSearch = "";
+  openModal(
+    modalShell(
+      `${AI_LABEL[provider] || provider} models`,
+      `<div class="search" style="margin-bottom:12px">${I("search", 16)}<input id="ai-model-search" type="text" placeholder="Search models" /></div>
+       <div id="ai-models-body" style="max-height:360px;overflow:auto"><div style="padding:20px;text-align:center;color:var(--text-3)">Loading…</div></div>`,
+      `<button class="btn primary" data-act="closeModal">Done</button>`
+    )
+  );
+  try {
+    const { models } = await api.aiModels(provider);
+    aiModelsAll = models || [];
+    renderAiModelsBody();
+  } catch (e) {
+    const b = $("#ai-models-body");
+    if (b) b.innerHTML = `<div style="padding:20px;color:var(--red)">${esc(e.message || "Couldn't load models.")}</div>`;
+  }
+}
+
+function renderAiModelsBody() {
+  const b = $("#ai-models-body");
+  if (!b) return;
+  const q = (ui.aiModelSearch || "").toLowerCase();
+  const list = aiModelsAll.filter((m) => !q || m.id.toLowerCase().includes(q));
+  b.innerHTML = list.length
+    ? list
+        .map((m) => {
+          const fav = store.isFavorite(aiModelsProvider, m.id);
+          return `<button class="ai-model-row ${fav ? "fav" : ""}" data-act="aiToggleFav:${aiModelsProvider}:${encodeURIComponent(m.id)}">
+            <span class="ai-model-star">${I("star", 16)}</span>
+            <span style="flex:1;text-align:left;word-break:break-all">${esc(m.id)}</span>
+          </button>`;
+        })
+        .join("")
+    : `<div style="padding:20px;color:var(--text-3)">No models match.</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,6 +1349,9 @@ document.addEventListener("input", (e) => {
   } else if (id === "hist-search") {
     ui.historySearch = e.target.value;
     scheduleRender();
+  } else if (id === "ai-model-search") {
+    ui.aiModelSearch = e.target.value;
+    renderAiModelsBody();
   }
 });
 
@@ -1212,6 +1372,10 @@ document.addEventListener("change", (e) => {
   } else if (id === "hist-to") {
     ui.historyTo = e.target.value;
     scheduleRender();
+  } else if (id === "ai-default") {
+    const [provider, ...rest] = e.target.value.split("::");
+    const model = rest.join("::");
+    if (provider && model) store.setAiDefault(provider, model);
   }
 });
 
@@ -1467,6 +1631,25 @@ function handleAction(act, target) {
       return enableReminder();
     case "scrollTop":
       return window.scrollTo({ top: 0, behavior: "smooth" });
+
+    // AI assistant
+    case "orderAI":
+      return ai?.startReorder();
+    case "aiModels":
+      return aiModelsModal(key);
+    case "aiToggleFav": {
+      const provider = rest[0];
+      const model = decodeURIComponent(rest[1] || "");
+      if (store.isFavorite(provider, model)) store.removeFavorite(provider, model);
+      else store.addFavorite(provider, model);
+      return renderAiModelsBody();
+    }
+    case "aiUnfav": {
+      const provider = rest[0];
+      const model = decodeURIComponent(rest[1] || "");
+      store.removeFavorite(provider, model);
+      return;
+    }
 
     // Stats calendar navigation
     case "calPrev":

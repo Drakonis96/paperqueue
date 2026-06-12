@@ -15,6 +15,7 @@ import { ZoteroClient } from "./zotero.js";
 import { ZoteroStream } from "./stream.js";
 import { DemoZoteroClient } from "./demo.js";
 import { zoteroItemForDOI } from "./crossref.js";
+import { aiConfig, aiEnabled, listModels, streamChat } from "./ai.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
@@ -116,7 +117,8 @@ function broadcastChanged(version) {
 // MARK: - App ----------------------------------------------------------------
 
 const app = express();
-app.use(express.json({ limit: "256kb" }));
+// AI chat messages carry collection titles / queue lists, so allow a larger body.
+app.use(express.json({ limit: "1mb" }));
 
 function requireClient(res) {
   if (!state.client) {
@@ -146,6 +148,7 @@ app.get("/api/config", (_req, res) => {
     library: state.library,
     canWrite: state.demo ? true : state.canWrite ?? false,
     version: config.version,
+    ai: aiEnabled(),
   });
 });
 
@@ -219,6 +222,45 @@ app.post("/api/doi", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
+  }
+});
+
+// MARK: - AI assistant -------------------------------------------------------
+// Provider API keys never leave the server: these routes read them from env and
+// only ever return models / streamed completions, never the keys themselves.
+
+app.get("/api/ai/config", (_req, res) => {
+  res.json({ providers: aiConfig() });
+});
+
+app.get("/api/ai/models", async (req, res) => {
+  try {
+    const models = await listModels(String(req.query.provider || ""));
+    res.json({ models });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post("/api/ai/chat", async (req, res) => {
+  const { provider, ...body } = req.body || {};
+  // Abort the upstream provider request if the browser disconnects or hits Stop.
+  // Listen on the *response* close (client disconnect / stream end), not the
+  // request — the request stream closes as soon as its body is read, which would
+  // abort the upstream call before it even starts.
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+  try {
+    await streamChat(String(provider || ""), body, res, controller.signal);
+  } catch (err) {
+    if (!res.headersSent) handleError(res, err);
+    else {
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 });
 

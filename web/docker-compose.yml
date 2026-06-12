@@ -20,3 +20,11 @@ services:
       PORT: "5954"
       # Read a group library instead of your personal one (optional):
       # ZOTERO_LIBRARY: groups/123456
+      # AI assistant (optional) — keys stay on the server, never sent to browsers.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # Any OpenAI-compatible endpoint (Ollama, Groq, LM Studio…):
+      AI_CUSTOM_NAME: ${AI_CUSTOM_NAME:-}
+      AI_CUSTOM_BASE_URL: ${AI_CUSTOM_BASE_URL:-}
+      AI_CUSTOM_API_KEY: ${AI_CUSTOM_API_KEY:-}

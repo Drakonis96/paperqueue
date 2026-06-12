@@ -160,6 +160,10 @@ export class Store {
       activeQueue: DEFAULT_QUEUE,
       dailyGoal: 1,
       readExtraTags: [],
+      // AI assistant: favourite provider/model pairs the user picks in Settings,
+      // and the default selection for the chat. Keys never live here — only ids.
+      aiFavorites: [], // [{ provider, model }]
+      aiDefault: null, // { provider, model } | null
     };
 
     this.pendingWrites = new Set(); // keys with an in-flight tag write
@@ -637,6 +641,60 @@ export class Store {
     this.settings.readExtraTags = uniq(tags);
     this._saveCache();
     this.notify();
+  }
+
+  // -- AI assistant settings -------------------------------------------------
+
+  isFavorite(provider, model) {
+    return this.settings.aiFavorites.some((f) => f.provider === provider && f.model === model);
+  }
+  addFavorite(provider, model) {
+    if (this.isFavorite(provider, model)) return;
+    this.settings.aiFavorites = [...this.settings.aiFavorites, { provider, model }];
+    if (!this.settings.aiDefault) this.settings.aiDefault = { provider, model };
+    this._saveCache();
+    this.notify();
+  }
+  removeFavorite(provider, model) {
+    this.settings.aiFavorites = this.settings.aiFavorites.filter(
+      (f) => !(f.provider === provider && f.model === model)
+    );
+    const d = this.settings.aiDefault;
+    if (d && d.provider === provider && d.model === model) {
+      this.settings.aiDefault = this.settings.aiFavorites[0] || null;
+    }
+    this._saveCache();
+    this.notify();
+  }
+  setAiDefault(provider, model) {
+    this.settings.aiDefault = { provider, model };
+    this._saveCache();
+    this.notify();
+  }
+
+  // -- Undo support (AI actions) ---------------------------------------------
+  // AI actions (queue additions, reorder) only ever change pq: tags, so undo is
+  // just "restore the exact tag set each affected paper had before". Capture
+  // before applying; restore writes the snapshot back through the normal path.
+
+  captureTags(keys) {
+    const snap = new Map();
+    for (const key of keys) {
+      const p = this.papers.get(key);
+      if (p) snap.set(key, p.tags.slice());
+    }
+    return snap;
+  }
+  restoreTags(snapshot) {
+    for (const [key, tags] of snapshot) {
+      const p = this.papers.get(key);
+      if (!p) continue;
+      p.tags = tags.slice();
+      this._deriveState(p);
+    }
+    this._saveCache();
+    this.notify();
+    for (const [key, tags] of snapshot) this._writeTags(key, tags);
   }
 
   // -- Derived collections for views ----------------------------------------

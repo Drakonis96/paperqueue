@@ -79,6 +79,20 @@ export const config = {
 
   /// Force demo mode even if a key is present (handy for screenshots / trying).
   demo: process.env.DEMO_MODE === "1" || process.env.DEMO_MODE === "true",
+
+  /// AI assistant providers. Keys live ONLY here (server-side) — they are never
+  /// returned to the browser and never logged. Leave a key empty to disable that
+  /// provider. The custom slot is any OpenAI-compatible endpoint (Ollama, Groq…).
+  ai: {
+    openai: { apiKey: (process.env.OPENAI_API_KEY || "").trim() },
+    openrouter: { apiKey: (process.env.OPENROUTER_API_KEY || "").trim() },
+    deepseek: { apiKey: (process.env.DEEPSEEK_API_KEY || "").trim() },
+    custom: {
+      name: (process.env.AI_CUSTOM_NAME || "").trim(),
+      baseUrl: (process.env.AI_CUSTOM_BASE_URL || "").trim(),
+      apiKey: (process.env.AI_CUSTOM_API_KEY || "").trim(),
+    },
+  },
 };
 
 /// True when we have no real credentials (or DEMO_MODE is forced) and should

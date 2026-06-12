@@ -18,3 +18,10 @@ services:
     environment:
       ZOTERO_API_KEY: ${ZOTERO_API_KEY:-}
       PORT: "5954"
+      # AI assistant (optional) — keys stay on the server, never sent to browsers.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      AI_CUSTOM_NAME: ${AI_CUSTOM_NAME:-}
+      AI_CUSTOM_BASE_URL: ${AI_CUSTOM_BASE_URL:-}
+      AI_CUSTOM_API_KEY: ${AI_CUSTOM_API_KEY:-}

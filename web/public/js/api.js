@@ -41,6 +41,80 @@ export const api = {
   addByDOI: (doi) =>
     request("/api/doi", { method: "POST", body: JSON.stringify({ doi }) }),
 
+  // -- AI assistant ----------------------------------------------------------
+  // The browser never holds provider keys; these only ever exchange model lists
+  // and streamed completions with the server.
+
+  aiConfig: () => request("/api/ai/config"),
+  aiModels: (provider) =>
+    request(`/api/ai/models?provider=${encodeURIComponent(provider)}`),
+
+  /**
+   * Streams a chat completion. Calls `onEvent` with structured events:
+   *   { type: "delta", delta, finish_reason }  — an incremental chunk
+   *   { type: "done" }                          — provider sent [DONE]
+   *   { type: "error", error }                  — a mid-stream error frame
+   * Pass `signal` (AbortSignal) to support a Stop button.
+   */
+  async aiChat({ provider, model, messages, tools, tool_choice, temperature, signal }, onEvent) {
+    const res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, model, messages, tools, tool_choice, temperature }),
+      signal,
+    });
+    if (!res.ok || !res.body) {
+      let msg = `Request failed (${res.status})`;
+      try {
+        const j = await res.json();
+        msg = j?.error || msg;
+      } catch {
+        /* non-JSON */
+      }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    const flush = (frame) => {
+      let event = "message";
+      const dataLines = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (!dataLines.length) return; // comment / keep-alive
+      const data = dataLines.join("\n");
+      if (data === "[DONE]") return onEvent({ type: "done" });
+      let json;
+      try {
+        json = JSON.parse(data);
+      } catch {
+        return;
+      }
+      if (event === "error" || json.error) {
+        return onEvent({ type: "error", error: json.error?.message || json.error || "AI error" });
+      }
+      const choice = json.choices?.[0] || {};
+      onEvent({ type: "delta", delta: choice.delta || {}, finish_reason: choice.finish_reason || null });
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        flush(buf.slice(0, idx));
+        buf = buf.slice(idx + 2);
+      }
+    }
+    if (buf.trim()) flush(buf);
+  },
+
   /** Subscribes to live "library changed" events. Returns an unsubscribe fn. */
   liveUpdates(onChanged) {
     let es;
