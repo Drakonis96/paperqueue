@@ -144,14 +144,15 @@ export async function streamChat(providerId, body, res, signal) {
   }
 
   // DeepSeek V4 models (and the legacy reasoner alias) default to thinking
-  // mode, which rejects a forced tool_choice. Disable thinking and require a
-  // tool call so the model still produces structured output instead of prose.
+  // mode, which rejects a forced tool_choice. Disable thinking when we were
+  // going to force a specific function, and let the caller decide whether to
+  // require a tool call.
   if (
     providerId === "deepseek" &&
     body.tool_choice &&
     typeof body.tool_choice === "object"
   ) {
-    body = { ...body, thinking: { type: "disabled" }, tool_choice: "required" };
+    body = { ...body, thinking: { type: "disabled" } };
   }
 
   let upstream;

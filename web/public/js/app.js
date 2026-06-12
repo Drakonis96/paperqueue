@@ -369,6 +369,9 @@ function queueView() {
   const orderAIBtn = canOrderAI
     ? `<button class="btn ai-order-btn" data-act="orderAI" title="Let the assistant group related papers">${I("sparkle", 16)} Order with AI</button>`
     : "";
+  const suggestAIBtn = store.config.ai
+    ? `<button class="btn ai-order-btn" data-act="suggestAI" title="Get suggestions from a collection">${I("sparkle", 16)} Suggest with AI</button>`
+    : "";
   const queueSelector = `
     <div class="toolbar">
       <button class="select" data-act="queueMenu" style="display:inline-flex;align-items:center;gap:8px">
@@ -379,6 +382,7 @@ function queueView() {
         <input id="queue-search" type="text" placeholder="Search queue" value="${attr(ui.queueSearch)}" />
       </div>
       <div class="spacer" style="flex:1"></div>
+      ${suggestAIBtn}
       ${orderAIBtn}
     </div>`;
 
@@ -1637,7 +1641,9 @@ function handleAction(act, target) {
 
     // AI assistant
     case "orderAI":
-      return ai?.startReorder();
+      return ai?.orderQueue();
+    case "suggestAI":
+      return ai?.addSuggestions();
     case "aiModels":
       return aiModelsModal(key);
     case "aiToggleFav": {
