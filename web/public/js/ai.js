@@ -235,7 +235,7 @@ function openPickerModal(title, bodyHtml, onDone) {
     </div>`;
   bindModelSelector(back);
   const close = () => back.remove();
-  back.addEventListener("click", (e) => {
+  back.addEventListener("click", async (e) => {
     const toggle = e.target.closest(".ai-tree-toggle");
     if (toggle) {
       const node = toggle.closest(".ai-tree-node");
@@ -250,8 +250,21 @@ function openPickerModal(title, bodyHtml, onDone) {
     }
     if (e.target === back || e.target.closest("[data-ai-close]")) close();
     else if (e.target.closest("[data-ai-done]")) {
-      onDone?.(back);
-      close();
+      const button = back.querySelector("[data-ai-done]");
+      const originalLabel = button?.textContent;
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Working…";
+      }
+      try {
+        const shouldClose = await onDone?.(back);
+        if (shouldClose !== false) close();
+      } finally {
+        if (button?.isConnected) {
+          button.disabled = false;
+          button.textContent = originalLabel || "Continue";
+        }
+      }
     }
   });
   document.body.appendChild(back);
@@ -309,7 +322,7 @@ export async function orderQueue() {
 
   const confirmed = await new Promise((resolve) => {
     const selector = document.createElement("div");
-    selector.innerHTML = modelSelectorHtml(defaultModel);
+    selector.innerHTML = modelSelectorHtml();
     const back = document.createElement("div");
     back.className = "ai-mini-backdrop";
     back.innerHTML = `
@@ -324,7 +337,7 @@ export async function orderQueue() {
           <button class="ai-btn" data-ai-cancel>Cancel</button>
         </div>
       </div>`;
-    bindModelSelector(back, defaultModel);
+    bindModelSelector(back);
     back.addEventListener("click", (e) => {
       if (e.target.closest("[data-ai-cancel]") || e.target === back) {
         back.remove();
@@ -440,12 +453,13 @@ export async function addSuggestions() {
       }));
       if (!picked.length) {
         toast("Pick at least one collection", "error");
-        return;
+          return false;
       }
-      const sel = currentModelFrom(modal);
-      const countInput = modal.querySelector("[data-ai-count]");
+        const sel = currentModelFrom(root);
+        const countInput = root.querySelector("[data-ai-count]");
       const count = Math.max(1, Math.min(50, parseInt(countInput?.value || "5", 10)));
       await runSuggestions(sel, picked, count);
+        return true;
     }
   );
 }
