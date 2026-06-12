@@ -62,12 +62,45 @@ function providerLabel(id) {
   return { openai: "OpenAI", openrouter: "OpenRouter", deepseek: "DeepSeek", custom: "Custom" }[id] || id;
 }
 
+function modelSelectorHtml(id = "ai-model-select") {
+  const favs = store.settings.aiFavorites || [];
+  if (!favs.length) return `<span class="ai-muted">No favourite models</span>`;
+  const d = store.settings.aiDefault;
+  const options = favs
+    .map((f) => {
+      const val = `${f.provider}::${f.model}`;
+      const sel = d && d.provider === f.provider && d.model === f.model ? "selected" : "";
+      return `<option value="${esc(val)}" ${sel}>${esc(providerLabel(f.provider))} · ${esc(f.model)}</option>`;
+    })
+    .join("");
+  return `<select id="${id}" class="ai-model-select">${options}</select>`;
+}
+
+function bindModelSelector(root, id = "ai-model-select") {
+  const sel = root.querySelector(`#${id}`);
+  if (!sel) return;
+  sel.addEventListener("change", () => {
+    const [provider, ...rest] = sel.value.split("::");
+    const model = rest.join("::");
+    if (provider && model) store.setAiDefault(provider, model);
+  });
+}
+
+function currentModelFrom(root, id = "ai-model-select") {
+  const sel = root?.querySelector(`#${id}`);
+  if (sel) {
+    const [provider, ...rest] = sel.value.split("::");
+    const model = rest.join("::");
+    if (provider && model) return { provider, model };
+  }
+  return currentModel();
+}
+
 // ---------------------------------------------------------------------------
 // Generic non-streaming AI call
 // ---------------------------------------------------------------------------
 
-async function askAi(messages, { temperature = 0.2 } = {}) {
-  const sel = currentModel();
+async function askAi(messages, { sel = currentModel(), temperature = 0.2 } = {}) {
   if (!sel) throw new Error("Pick a model in Settings → AI assistant.");
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(), 120000); // 2 min max
@@ -197,10 +230,11 @@ function openPickerModal(title, bodyHtml, onDone) {
   back.className = "ai-mini-backdrop";
   back.innerHTML = `
     <div class="ai-mini">
-      <div class="ai-mini-head"><h3>${esc(title)}</h3><button class="ai-icon" data-ai-close>${I("x", 16)}</button></div>
+      <div class="ai-mini-head"><h3>${esc(title)}</h3>${modelSelectorHtml()}</div>
       <div class="ai-mini-body">${bodyHtml}</div>
       <div class="ai-mini-foot"><button class="ai-btn primary" data-ai-done>Continue</button></div>
     </div>`;
+  bindModelSelector(back);
   const close = () => back.remove();
   back.addEventListener("click", (e) => {
     const toggle = e.target.closest(".ai-tree-toggle");
@@ -222,6 +256,7 @@ function openPickerModal(title, bodyHtml, onDone) {
     }
   });
   document.body.appendChild(back);
+  return back;
 }
 
 function openPreviewModal(title, bodyHtml, onApply, onDismiss) {
@@ -339,8 +374,7 @@ export async function orderQueue() {
 
 export async function addSuggestions() {
   if (!aiReady()) return;
-  const sel = currentModel();
-  if (!sel) {
+  if (!currentModel()) {
     toast("Pick a model in Settings → AI assistant", "error");
     return;
   }
@@ -358,7 +392,7 @@ export async function addSuggestions() {
     ? renderCollectionTree(roots, 0, selected)
     : `<div class="ai-muted">No collections in this library.</div>`;
 
-  openPickerModal(
+  const modal = openPickerModal(
     "Choose collections",
     `<div class="ai-muted" style="margin-bottom:10px">Pick one or more collections to suggest papers from.</div><div class="ai-pick-list">${body}</div>`,
     async (root) => {
@@ -370,6 +404,7 @@ export async function addSuggestions() {
         toast("Pick at least one collection", "error");
         return;
       }
+      const sel = currentModelFrom(modal);
       await runSuggestions(sel, picked);
     }
   );
@@ -419,7 +454,7 @@ async function runSuggestions(sel, pickedCollections) {
           `Context items:\n${listText}`,
       },
       { role: "user", content: "Recommend papers to add to my reading queue." },
-    ]);
+    ], { sel });
   } catch (err) {
     done();
     toast(err.message || "Couldn't get suggestions", "error");

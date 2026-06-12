@@ -1461,6 +1461,7 @@ pre.code {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 13px 16px;
   border-bottom: 1px solid var(--border);
   flex: none;
@@ -1468,6 +1469,18 @@ pre.code {
 .ai-mini-head h3 {
   margin: 0;
   font-size: 15px;
+  flex: 1;
+  min-width: 0;
+}
+.ai-model-select {
+  max-width: 220px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 8px;
 }
 .ai-icon {
   width: 32px;

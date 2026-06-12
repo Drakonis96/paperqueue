@@ -84,7 +84,9 @@ export const api = {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
+    let callbackError = null;
     const flush = (frame) => {
+      if (callbackError) return;
       let event = "message";
       const dataLines = [];
       for (const line of frame.split("\n")) {
@@ -93,7 +95,10 @@ export const api = {
       }
       if (!dataLines.length) return; // comment / keep-alive
       const data = dataLines.join("\n");
-      if (data === "[DONE]") return onEvent({ type: "done" });
+      if (data === "[DONE]") {
+        try { onEvent({ type: "done" }); } catch (err) { callbackError = err; }
+        return;
+      }
       let json;
       try {
         json = JSON.parse(data);
@@ -101,7 +106,8 @@ export const api = {
         return;
       }
       if (event === "error" || json.error) {
-        return onEvent({ type: "error", error: json.error?.message || json.error || "AI error" });
+        try { onEvent({ type: "error", error: json.error?.message || json.error || "AI error" }); } catch (err) { callbackError = err; }
+        return;
       }
       const choice = json.choices?.[0] || {};
       const delta = choice.delta || {};
@@ -110,10 +116,11 @@ export const api = {
       if (!delta.tool_calls && Array.isArray(choice.message?.tool_calls)) {
         delta.tool_calls = choice.message.tool_calls;
       }
-      onEvent({ type: "delta", delta, finish_reason: choice.finish_reason || null });
+      try { onEvent({ type: "delta", delta, finish_reason: choice.finish_reason || null }); } catch (err) { callbackError = err; }
     };
 
     for (;;) {
+      if (callbackError) break;
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
@@ -124,6 +131,7 @@ export const api = {
       }
     }
     if (buf.trim()) flush(buf);
+    if (callbackError) throw callbackError;
   },
 
   /** Subscribes to live "library changed" events. Returns an unsubscribe fn. */
