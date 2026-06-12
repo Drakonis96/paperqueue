@@ -32,7 +32,6 @@ function esc(s) {
 }
 
 const MAX_CONTEXT_ITEMS = 300;
-const MAX_ADD_SUGGESTIONS = 20;
 
 let store = null;
 let api = null;
@@ -286,7 +285,7 @@ function openPreviewModal(title, bodyHtml, onApply, onDismiss) {
 function busyModal(title, message) {
   const back = document.createElement("div");
   back.className = "ai-mini-backdrop";
-  back.innerHTML = `<div class="ai-mini"><div class="ai-mini-body" style="text-align:center;padding:28px"><div style="color:var(--accent);margin-bottom:10px">${I("spark", 32)}</div><div style="font-weight:700">${esc(title)}</div><div style="color:var(--text-2);font-size:13px;margin-top:6px">${esc(message)}</div></div></div>`;
+  back.innerHTML = `<div class="ai-mini"><div class="ai-mini-body" style="text-align:center;padding:28px"><div class="ai-busy-icon">${I("spark", 32)}</div><div style="font-weight:700">${esc(title)}</div><div style="color:var(--text-2);font-size:13px;margin-top:6px">${esc(message)}</div></div></div>`;
   document.body.appendChild(back);
   return () => back.remove();
 }
@@ -297,8 +296,8 @@ function busyModal(title, message) {
 
 export async function orderQueue() {
   if (!aiReady()) return;
-  const sel = currentModel();
-  if (!sel) {
+  const defaultModel = currentModel();
+  if (!defaultModel) {
     toast("Pick a model in Settings → AI assistant", "error");
     return;
   }
@@ -307,6 +306,40 @@ export async function orderQueue() {
     toast("Add at least two papers to reorder", "error");
     return;
   }
+
+  const confirmed = await new Promise((resolve) => {
+    const selector = document.createElement("div");
+    selector.innerHTML = modelSelectorHtml(defaultModel);
+    const back = document.createElement("div");
+    back.className = "ai-mini-backdrop";
+    back.innerHTML = `
+      <div class="ai-mini">
+        <div class="ai-mini-head"><h3>Order with AI</h3></div>
+        <div class="ai-mini-body">
+          <div class="ai-muted" style="margin-bottom:12px">Choose the model to reorder <strong>${pending.length}</strong> papers.</div>
+          ${selector.innerHTML}
+        </div>
+        <div class="ai-mini-foot">
+          <button class="ai-btn primary" data-ai-confirm>Start</button>
+          <button class="ai-btn" data-ai-cancel>Cancel</button>
+        </div>
+      </div>`;
+    bindModelSelector(back, defaultModel);
+    back.addEventListener("click", (e) => {
+      if (e.target.closest("[data-ai-cancel]") || e.target === back) {
+        back.remove();
+        resolve(null);
+      } else if (e.target.closest("[data-ai-confirm]")) {
+        const sel = currentModelFrom(back);
+        back.remove();
+        resolve(sel);
+      }
+    });
+    document.body.appendChild(back);
+  });
+
+  if (!confirmed) return;
+  const sel = confirmed;
 
   const label = store.activeQueue === DEFAULT_QUEUE ? "reading queue" : `“${store.activeQueue}” queue`;
   const listText = pending
@@ -328,7 +361,7 @@ export async function orderQueue() {
           `\`\`\`json\n["KEY1", "KEY2", "KEY3"]\n\`\`\``,
       },
       { role: "user", content: `Order my ${label} so related papers sit together.` },
-    ]);
+    ], { sel });
   } catch (err) {
     done();
     toast(err.message || "Couldn't order queue", "error");
@@ -393,8 +426,13 @@ export async function addSuggestions() {
     : `<div class="ai-muted">No collections in this library.</div>`;
 
   const modal = openPickerModal(
-    "Choose collections",
-    `<div class="ai-muted" style="margin-bottom:10px">Pick one or more collections to suggest papers from.</div><div class="ai-pick-list">${body}</div>`,
+    "Suggest with AI",
+    `<div class="ai-muted" style="margin-bottom:10px">Pick one or more collections to suggest papers from.</div>
+     <div style="margin:12px 0">
+       <label class="ai-field-label">Number of suggestions</label>
+       <input type="number" class="ai-count-input" min="1" max="50" value="5" data-ai-count style="width:80px">
+     </div>
+     <div class="ai-pick-list">${body}</div>`,
     async (root) => {
       const picked = [...root.querySelectorAll('input[type="checkbox"]:checked')].map((cb) => ({
         key: cb.value,
@@ -405,12 +443,14 @@ export async function addSuggestions() {
         return;
       }
       const sel = currentModelFrom(modal);
-      await runSuggestions(sel, picked);
+      const countInput = modal.querySelector("[data-ai-count]");
+      const count = Math.max(1, Math.min(50, parseInt(countInput?.value || "5", 10)));
+      await runSuggestions(sel, picked, count);
     }
   );
 }
 
-async function runSuggestions(sel, pickedCollections) {
+async function runSuggestions(sel, pickedCollections, count) {
   const queuedKeys = new Set(store.pendingInActiveQueue().map((p) => p.key));
   const seen = new Set();
   const contextItems = [];
@@ -446,7 +486,7 @@ async function runSuggestions(sel, pickedCollections) {
       {
         role: "system",
         content:
-          `You are PaperQueue's reading assistant. Suggest up to ${MAX_ADD_SUGGESTIONS} papers from the Context items below to add to the user's reading queue. ` +
+          `You are PaperQueue's reading assistant. Suggest up to ${count} papers from the Context items below to add to the user's reading queue. ` +
           `Choose items that complement the current queue. Return ONLY a JSON array of objects with keys \`key\`, \`title\`, and \`reason\`. ` +
           `Every \`key\` must come from the Context items. Do not include items already in the queue. ` +
           `Output must be valid JSON inside a markdown code block, like:\n\n` +

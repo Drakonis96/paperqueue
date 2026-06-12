@@ -1663,6 +1663,42 @@ pre.code {
   margin-top: 1px;
 }
 
+.ai-busy-icon {
+  color: var(--accent);
+  margin-bottom: 10px;
+  animation: ai-busy-spin 1.4s linear infinite;
+  display: inline-block;
+}
+@keyframes ai-busy-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.ai-count-input {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.ai-count-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.ai-field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
 /* Mobile */
 @media (max-width: 860px) {
   .ai-mini {
