@@ -80,6 +80,12 @@ export const config = {
   /// Force demo mode even if a key is present (handy for screenshots / trying).
   demo: process.env.DEMO_MODE === "1" || process.env.DEMO_MODE === "true",
 
+  /// Directory for server-side persisted state (user settings). Mount a volume
+  /// here in Docker so it survives restarts. Defaults to web/data for local runs.
+  dataDir:
+    (process.env.DATA_DIR || "").trim() ||
+    path.resolve(__dirname, "..", "data"),
+
   /// AI assistant providers. Keys live ONLY here (server-side) — they are never
   /// returned to the browser and never logged. Leave a key empty to disable that
   /// provider. The custom slot is any OpenAI-compatible endpoint (Ollama, Groq…).

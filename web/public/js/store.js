@@ -172,6 +172,13 @@ export class Store {
     this.syncProgress = null;
     this.lastError = null;
 
+    // Server-side settings persistence (shared across devices). Gated until
+    // loadSettings() has reconciled with the server, so early reconciles don't
+    // push stale local settings over what another device saved.
+    this._settingsReady = false;
+    this._lastPersistedSettings = null;
+    this._persistTimer = null;
+
     this._loadCache();
   }
 
@@ -213,6 +220,45 @@ export class Store {
     } catch {
       /* quota — ignore */
     }
+    this._maybePersistSettings();
+  }
+
+  // -- Server-side settings (shared across devices) --------------------------
+
+  /**
+   * Reconciles settings with the server on boot. The server (DATA_DIR) is the
+   * source of truth: if it has settings we adopt them; if it's empty we seed it
+   * from whatever this browser had locally. Falls back to local settings if the
+   * server can't be reached.
+   */
+  async loadSettings() {
+    try {
+      const server = await api.settings();
+      if (server && Object.keys(server).length) {
+        this.settings = { ...this.settings, ...server };
+        this._saveCache(); // mirror into localStorage (persist still gated off)
+      } else {
+        await api.saveSettings(this.settings).catch(() => {});
+      }
+    } catch {
+      /* server unavailable — keep local settings */
+    }
+    this._lastPersistedSettings = JSON.stringify(this.settings);
+    this._settingsReady = true;
+    this.notify();
+  }
+
+  /** Debounced push of settings to the server, only when they actually change. */
+  _maybePersistSettings() {
+    if (!this._settingsReady) return;
+    const json = JSON.stringify(this.settings);
+    if (json === this._lastPersistedSettings) return;
+    this._lastPersistedSettings = json;
+    clearTimeout(this._persistTimer);
+    this._persistTimer = setTimeout(
+      () => api.saveSettings(this.settings).catch(() => {}),
+      600
+    );
   }
 
   // -- Queues ----------------------------------------------------------------

@@ -73,6 +73,15 @@ iPhone/iPad app and the Mac app all stay in lock-step.
 | `ZOTERO_USER_ID`  | *(resolved from the key)* | Override the user id (rarely needed).                   |
 | `ZOTERO_API_BASE` | `https://api.zotero.org`  | Override the Zotero API endpoint (proxies).             |
 | `DEMO_MODE`       | `0`                       | Force the demo library even with a key set.             |
+| `DATA_DIR`        | `/data` (Docker)          | Where user settings are persisted. Mount a volume here. |
+
+### Settings persistence (`/data`)
+
+User settings — daily goal, custom queues, tags-on-read and AI favourites — are
+**not** Zotero tags, so they're saved on the server (in `DATA_DIR/settings.json`)
+and shared across every browser/device that uses this instance. The compose
+files mount a named volume `paperqueue-data` at `/data` so they survive restarts
+and image updates. Queue/read **state** still lives in Zotero tags as before.
 
 ### AI assistant (optional)
 

@@ -140,6 +140,9 @@ init();
 
 async function init() {
   await store.loadConfig();
+  // Settings live on the server (shared across devices), reconciled before the
+  // first meaningful render so queues / goal / AI favourites are right away.
+  await store.loadSettings();
   store.subscribe(scheduleRender);
   ai = initAi({ store, api, toast });
   render();

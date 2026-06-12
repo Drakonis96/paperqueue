@@ -14,10 +14,15 @@ services:
     restart: unless-stopped
     ports:
       - "5954:5954"
+    volumes:
+      # Persists user settings (daily goal, queues, AI favourites…) across
+      # restarts and updates, shared by every browser that uses this server.
+      - paperqueue-data:/data
     environment:
       # Create one at https://www.zotero.org/settings/keys/new (read & write).
       ZOTERO_API_KEY: ${ZOTERO_API_KEY:-}
       PORT: "5954"
+      DATA_DIR: /data
       # Read a group library instead of your personal one (optional):
       # ZOTERO_LIBRARY: groups/123456
       # AI assistant (optional) — keys stay on the server, never sent to browsers.
@@ -28,3 +33,6 @@ services:
       AI_CUSTOM_NAME: ${AI_CUSTOM_NAME:-}
       AI_CUSTOM_BASE_URL: ${AI_CUSTOM_BASE_URL:-}
       AI_CUSTOM_API_KEY: ${AI_CUSTOM_API_KEY:-}
+
+volumes:
+  paperqueue-data:

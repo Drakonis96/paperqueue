@@ -13,6 +13,11 @@ COPY public ./public
 
 ENV NODE_ENV=production
 ENV PORT=5954
+# Server-side persisted state (user settings) lives here. Mount a volume at it
+# (see docker-compose) so settings survive container restarts and updates.
+ENV DATA_DIR=/data
+RUN mkdir -p /data
+VOLUME ["/data"]
 EXPOSE 5954
 
 # Simple healthcheck against the built-in endpoint.

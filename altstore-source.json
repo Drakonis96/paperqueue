@@ -19,6 +19,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "1.14.0",
+          "buildVersion": "19",
+          "date": "2026-06-12",
+          "localizedDescription": "Web edition only in this release — no functional changes to the iPhone/iPad app; the version is kept aligned across platforms.\n\n• New AI assistant in the web app: a floating chat (OpenAI, OpenRouter, DeepSeek or any OpenAI-compatible endpoint) that suggests papers for your queue from context collections and reorders your queue by topic — every action is confirmed and undoable, and provider keys stay on the server.\n• User settings (daily goal, custom queues, tags-on-read, AI favourites) now persist on the server and are shared across every browser, via a mounted /data volume.",
+          "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.14.0/PaperQueue-unsigned.ipa",
+          "size": 1519040,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.10.0",
           "buildVersion": "15",
           "date": "2026-06-12",

@@ -16,6 +16,7 @@ import { ZoteroStream } from "./stream.js";
 import { DemoZoteroClient } from "./demo.js";
 import { zoteroItemForDOI } from "./crossref.js";
 import { aiConfig, aiEnabled, listModels, streamChat } from "./ai.js";
+import { readSettings, writeSettings } from "./storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
@@ -261,6 +262,27 @@ app.post("/api/ai/chat", async (req, res) => {
         /* ignore */
       }
     }
+  }
+});
+
+// MARK: - User settings (server-side persistence) ----------------------------
+// Settings aren't Zotero tags, so they're stored on the server (DATA_DIR) and
+// shared across every browser/device that talks to this instance.
+
+app.get("/api/settings", (_req, res) => {
+  res.json(readSettings());
+});
+
+app.put("/api/settings", (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return res.status(400).json({ error: "Body must be a settings object." });
+  }
+  try {
+    writeSettings(body);
+    res.status(204).end();
+  } catch (err) {
+    handleError(res, err);
   }
 });
 

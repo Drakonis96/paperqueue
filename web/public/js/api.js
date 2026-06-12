@@ -41,6 +41,11 @@ export const api = {
   addByDOI: (doi) =>
     request("/api/doi", { method: "POST", body: JSON.stringify({ doi }) }),
 
+  // -- User settings (server-side, shared across devices) --------------------
+  settings: () => request("/api/settings"),
+  saveSettings: (settings) =>
+    request("/api/settings", { method: "PUT", body: JSON.stringify(settings) }),
+
   // -- AI assistant ----------------------------------------------------------
   // The browser never holds provider keys; these only ever exchange model lists
   // and streamed completions with the server.
