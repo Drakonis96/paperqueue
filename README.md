@@ -82,9 +82,9 @@ Your API key is stored only in the device **Keychain** and sent as the
 
 ## Install
 
-### Web (self-hosted) — one port, one service
-Run PaperQueue in your browser on any machine. The Zotero key lives only on the
-server (set it via `.env` or docker-compose); no IP wrangling.
+### Web (self-hosted)
+Run PaperQueue in your browser on any machine. Set the Zotero key via `.env` or
+docker-compose.
 
 ```bash
 cd web
@@ -141,7 +141,7 @@ PaperQueue/
 │   ├── PaperQueue/            # app sources (App, Auth, Networking, Persistence, Features…)
 │   ├── PaperQueueWidget/      # WidgetKit extension
 │   └── Shared/                # code shared with the widget (App Group snapshot)
-├── web/                       # self-hosted web edition (Node + browser, single port)
+├── web/                       # self-hosted web edition (Node + browser)
 │   ├── src/                   # Express service: static UI + Zotero proxy + live SSE
 │   ├── public/                # the browser app (vanilla JS, no build step)
 │   └── docker-compose.yml

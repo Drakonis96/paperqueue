@@ -888,7 +888,7 @@ function settingsView() {
       </div>
       <div class="settings-row" style="margin-top:8px">
         <div style="color:var(--text-3)">${I("info", 18)}</div>
-        <div class="grow" style="font-size:12.5px;color:var(--text-3)">PaperQueue Web v${esc(store.config.version || "1.0")} · single service, single port. The Zotero key lives only on the server.</div>
+        <div class="grow" style="font-size:12.5px;color:var(--text-3)">PaperQueue Web v${esc(store.config.version || "1.0")}</div>
       </div>
     </div>`;
 
@@ -1049,7 +1049,7 @@ function setupScreen() {
     <p class="lede">Turn your Zotero library into a focused reading queue — in your browser.</p>
     <div class="card" style="padding:8px 22px">
       <div class="step"><div class="n">1</div><div class="st-body"><h4>Create a Zotero API key</h4><p>Open <a href="https://www.zotero.org/settings/keys/new" target="_blank" rel="noopener">zotero.org/settings/keys</a> and create a key with library <b>read &amp; write</b> access.</p></div></div>
-      <div class="step"><div class="n">2</div><div class="st-body"><h4>Give it to the server</h4><p>Set it as an environment variable — via <code>.env</code> or docker-compose — then restart. No IP or extra config: one port, one service.</p>
+      <div class="step"><div class="n">2</div><div class="st-body"><h4>Give it to the server</h4><p>Set it as an environment variable — via <code>.env</code> or docker-compose — then restart.</p>
         <pre class="code"># .env
 ZOTERO_API_KEY=your_key_here
 PORT=5954</pre>
