@@ -143,6 +143,17 @@ export async function streamChat(providerId, body, res, signal) {
     throw new AiError(400, "Request needs { model, messages }.");
   }
 
+  // DeepSeek reasoning models reject forced tool_choice; fall back to "auto".
+  if (
+    providerId === "deepseek" &&
+    body.model &&
+    /\b(reasoner|r1)\b/i.test(body.model) &&
+    body.tool_choice &&
+    typeof body.tool_choice === "object"
+  ) {
+    body = { ...body, tool_choice: "auto" };
+  }
+
   let upstream;
   try {
     upstream = await fetch(`${spec.base}/chat/completions`, {

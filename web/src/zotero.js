@@ -252,6 +252,6 @@ export class ZoteroClient {
       throw new ZoteroError(res.status, "Couldn't read collections.");
     }
     const list = await res.json();
-    return list.map((c) => ({ key: c.key, name: c.data.name }));
+    return list.map((c) => ({ key: c.key, name: c.data.name, parent: c.data.parentCollection || null }));
   }
 }

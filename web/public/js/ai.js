@@ -300,13 +300,35 @@ async function openContextPicker() {
     return;
   }
   const selected = new Set(state.contextCollections.map((c) => c.key));
+
+  // Build a tree from the flat list using parent references.
+  const map = new Map();
+  const roots = [];
+  for (const c of collections) {
+    map.set(c.key, { ...c, children: [] });
+  }
+  for (const c of map.values()) {
+    if (c.parent && map.has(c.parent)) {
+      map.get(c.parent).children.push(c);
+    } else {
+      roots.push(c);
+    }
+  }
+
+  function renderTree(nodes, depth) {
+    return nodes
+      .map((c) => {
+        const indent = depth * 18;
+        return (
+          `<label class="ai-pick-row" style="padding-left:${indent}px"><input type="checkbox" value="${esc(c.key)}" data-name="${esc(c.name)}" ${selected.has(c.key) ? "checked" : ""}/> ${esc(c.name)}</label>` +
+          (c.children.length ? renderTree(c.children, depth + 1) : "")
+        );
+      })
+      .join("");
+  }
+
   const body = collections.length
-    ? collections
-        .map(
-          (c) =>
-            `<label class="ai-pick-row"><input type="checkbox" value="${esc(c.key)}" data-name="${esc(c.name)}" ${selected.has(c.key) ? "checked" : ""}/> ${esc(c.name)}</label>`
-        )
-        .join("")
+    ? renderTree(roots, 0)
     : `<div class="ai-muted">No collections in this library.</div>`;
   openMiniModal(
     "Context collections",
@@ -322,10 +344,12 @@ async function openContextPicker() {
   );
 }
 
-/** Fetches + caches the items of a collection as { key, title, authors, year }. */
-async function collectionItems(key) {
+/** Fetches + caches the items of a collection (including subcollections recursively). */
+async function collectionItems(key, _fetching = new Set()) {
   if (state.collectionsCache.has(key)) return state.collectionsCache.get(key);
-  const { items } = await api.collection(key);
+  if (_fetching.has(key)) return []; // defensive cycle guard
+  _fetching.add(key);
+  const { items, subcollections } = await api.collection(key);
   const mapped = (items || []).map((it) => {
     const d = it.data || {};
     const names = (d.creators || [])
@@ -334,6 +358,12 @@ async function collectionItems(key) {
     const year = (String(d.date || "").match(/\d{4}/) || [])[0] || "";
     return { key: d.key, title: d.title || "(untitled)", authors: names.slice(0, 3).join(", "), year };
   });
+  if (subcollections && subcollections.length) {
+    for (const sub of subcollections) {
+      const subItems = await collectionItems(sub.key, _fetching);
+      mapped.push(...subItems);
+    }
+  }
   state.collectionsCache.set(key, mapped);
   return mapped;
 }
@@ -409,30 +439,24 @@ async function sendUserMessage(text, { contextMode = "additions" } = {}) {
 
 /** Builds the message array (system + context + transcript) and streams a turn. */
 async function runTurn(sel, { contextMode, forceReorder = false, queueItems = null } = {}) {
-  const apiMessages = [{ role: "system", content: SYSTEM_PROMPT }];
+  let systemContent = SYSTEM_PROMPT;
 
-  // Inject context as a system message so tool calls stay grounded.
   if (forceReorder && queueItems) {
-    apiMessages.push({
-      role: "system",
-      content:
-        "Current queue (reorder must be a permutation of exactly these keys):\n" +
-        queueItems
-          .map((p) => `- [${p.key}] ${p.title}${p.authorLine ? ` — ${p.authorLine}` : ""}${p.year ? ` (${p.year})` : ""}`)
-          .join("\n"),
-    });
+    systemContent +=
+      "\n\nCurrent queue (reorder must be a permutation of exactly these keys):\n" +
+      queueItems
+        .map((p) => `- [${p.key}] ${p.title}${p.authorLine ? ` — ${p.authorLine}` : ""}${p.year ? ` (${p.year})` : ""}`)
+        .join("\n");
   } else if (state.contextCollections.length) {
     const items = await buildContextItems();
     if (items.length) {
-      apiMessages.push({
-        role: "system",
-        content:
-          `Context items (the user selected ${state.contextCollections.map((c) => c.name).join(", ")}). ` +
-          `Use these keys for propose_queue_additions:\n` +
-          formatContextItems(items),
-      });
+      systemContent +=
+        `\n\nContext items (the user selected ${state.contextCollections.map((c) => c.name).join(", ")}). ` +
+        `Use these keys for propose_queue_additions:\n` +
+        formatContextItems(items);
     }
   }
+  const apiMessages = [{ role: "system", content: systemContent }];
   apiMessages.push(...state.messages);
 
   state.busy = true;
