@@ -1,0 +1,630 @@
+// Client-side model + state, mirroring the native app's QueueStore / AppConfig.
+//
+// Source of truth for queue state is a set of namespaced Zotero tags
+// (pq:queue, pq:qname:<name>, pq:pos:<n>, pq:read:<date>, pq:skip), so a queue
+// you build here syncs to your phone and Mac through Zotero itself. The server
+// is a thin proxy that holds the Zotero key and forwards reads/writes; all the
+// product logic lives right here in the browser.
+
+import { api } from "./api.js";
+
+export const Tags = {
+  queue: "pq:queue",
+  read: "pq:read",
+  skip: "pq:skip",
+  posPrefix: "pq:pos:",
+  qnamePrefix: "pq:qname:",
+  posGap: 1024,
+};
+
+const DEFAULT_QUEUE = "Default";
+// A built-in list that always exists alongside Default. "Postpone" moves a
+// paper here (via a pq:qname:Postponed tag) until the user puts it back in a
+// reading queue. Stored in Zotero like any named queue, so it syncs everywhere.
+const POSTPONED_QUEUE = "Postponed";
+const LS_KEY = "paperqueue.web.v1";
+
+export { DEFAULT_QUEUE, POSTPONED_QUEUE };
+
+// MARK: - Helpers ------------------------------------------------------------
+
+function uniq(arr) {
+  const seen = new Set();
+  return arr.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
+}
+
+function todayTag() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function creatorName(c) {
+  if (c.name) return c.name;
+  if (c.lastName && c.firstName) return `${c.lastName}, ${c.firstName}`;
+  return c.lastName || c.firstName || "";
+}
+
+/** Splits Zotero creators into authors and editors (mirrors QueueStore). */
+function splitCreators(creators) {
+  const authors = [];
+  const editors = [];
+  const others = [];
+  for (const c of creators || []) {
+    const name = creatorName(c);
+    if (!name) continue;
+    const type = (c.creatorType || "").toLowerCase();
+    if (type.includes("editor")) editors.push(name);
+    else if (
+      [
+        "author", "bookauthor", "contributor", "presenter", "podcaster",
+        "interviewee", "director", "inventor", "cartographer", "programmer",
+      ].includes(type)
+    )
+      authors.push(name);
+    else others.push(name);
+  }
+  return { authors: authors.length ? authors : others, editors };
+}
+
+function pageCount(raw) {
+  if (!raw) return null;
+  const m = String(raw).match(/(\d+)\s*[-–—]\s*(\d+)/);
+  if (!m) return null;
+  const startStr = m[1];
+  let endStr = m[2];
+  if (endStr.length < startStr.length) {
+    endStr = startStr.slice(0, startStr.length - endStr.length) + endStr;
+  }
+  const start = Number(startStr);
+  const end = Number(endStr);
+  if (!(end > start)) return null;
+  return end - start;
+}
+
+function yearOf(dateString) {
+  if (!dateString) return null;
+  const m = String(dateString).match(/\d{4}/);
+  return m ? m[0] : dateString;
+}
+
+function shortNames(names) {
+  if (names.length <= 2) return names.join(", ");
+  return `${names[0]} et al.`;
+}
+
+export function authorLine(p) {
+  if (p.authors.length) {
+    let line = shortNames(p.authors);
+    if (p.editors.length) line += ` · ed. ${shortNames(p.editors)}`;
+    return line;
+  }
+  if (p.editors.length) {
+    const label = p.editors.length > 1 ? "eds." : "ed.";
+    return `${shortNames(p.editors)} (${label})`;
+  }
+  return "Unknown author";
+}
+
+export function subtitle(p) {
+  return [p.publicationTitle, p.year].filter(Boolean).join(" · ");
+}
+
+// MARK: - Tag parsing --------------------------------------------------------
+
+function isReadTag(tags) {
+  return tags.some((t) => t === Tags.read || t.startsWith(Tags.read + ":"));
+}
+function parseReadDate(tags) {
+  for (const t of tags) {
+    if (t.startsWith(Tags.read + ":")) {
+      const d = t.slice(Tags.read.length + 1);
+      const parsed = new Date(d + "T00:00:00");
+      return isNaN(parsed) ? null : parsed;
+    }
+  }
+  return null;
+}
+function parsePos(tags) {
+  for (const t of tags) {
+    if (t.startsWith(Tags.posPrefix)) {
+      const n = Number(t.slice(Tags.posPrefix.length));
+      if (!isNaN(n)) return n;
+    }
+  }
+  return null;
+}
+function parseQueueName(tags) {
+  for (const t of tags) {
+    if (t.startsWith(Tags.qnamePrefix)) {
+      const name = t.slice(Tags.qnamePrefix.length);
+      return name || null;
+    }
+  }
+  return null;
+}
+
+// MARK: - Store --------------------------------------------------------------
+
+export class Store {
+  constructor() {
+    this.papers = new Map(); // key → paper
+    this.baselineVersion = null;
+    this.config = { connected: false, demo: false, username: null };
+
+    // Persisted user settings (browser-side, like AppConfig / UserDefaults).
+    this.settings = {
+      customQueues: [],
+      activeQueue: DEFAULT_QUEUE,
+      dailyGoal: 1,
+      readExtraTags: [],
+    };
+
+    this.pendingWrites = new Set(); // keys with an in-flight tag write
+    this.listeners = new Set();
+    this.isSyncing = false;
+    this.syncProgress = null;
+    this.lastError = null;
+
+    this._loadCache();
+  }
+
+  // -- Subscription ----------------------------------------------------------
+
+  subscribe(fn) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+  notify() {
+    for (const fn of this.listeners) fn();
+  }
+
+  // -- Persistence -----------------------------------------------------------
+
+  _loadCache() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      this.settings = { ...this.settings, ...(data.settings || {}) };
+      this.baselineVersion = data.baselineVersion ?? null;
+      for (const p of data.papers || []) this.papers.set(p.key, p);
+    } catch {
+      /* corrupt cache — start fresh */
+    }
+  }
+
+  _saveCache() {
+    try {
+      localStorage.setItem(
+        LS_KEY,
+        JSON.stringify({
+          baselineVersion: this.baselineVersion,
+          settings: this.settings,
+          papers: [...this.papers.values()],
+        })
+      );
+    } catch {
+      /* quota — ignore */
+    }
+  }
+
+  // -- Queues ----------------------------------------------------------------
+
+  get availableQueues() {
+    const custom = this.settings.customQueues.filter(
+      (q) => q !== DEFAULT_QUEUE && q !== POSTPONED_QUEUE
+    );
+    return [DEFAULT_QUEUE, POSTPONED_QUEUE, ...custom];
+  }
+  get activeQueue() {
+    const a = this.settings.activeQueue;
+    return this.availableQueues.includes(a) ? a : DEFAULT_QUEUE;
+  }
+  setActiveQueue(name) {
+    if (!this.availableQueues.includes(name)) return;
+    this.settings.activeQueue = name;
+    this._saveCache();
+    this.notify();
+  }
+  storedName(display) {
+    return display === DEFAULT_QUEUE ? null : display;
+  }
+  createQueue(rawName) {
+    const name = (rawName || "").trim();
+    if (
+      !name ||
+      this.availableQueues.some((q) => q.toLowerCase() === name.toLowerCase())
+    )
+      return false;
+    this.settings.customQueues = uniq([...this.settings.customQueues, name]);
+    this.settings.activeQueue = name;
+    this._saveCache();
+    this.notify();
+    return true;
+  }
+  deleteQueue(name) {
+    if (name === DEFAULT_QUEUE || name === POSTPONED_QUEUE) return;
+    const stored = this.storedName(name);
+    for (const p of this.papers.values()) {
+      if (p.isPending && p.queueName === stored) this.addToQueue(p, DEFAULT_QUEUE);
+    }
+    this.settings.customQueues = this.settings.customQueues.filter(
+      (q) => q !== name
+    );
+    if (this.settings.activeQueue === name)
+      this.settings.activeQueue = DEFAULT_QUEUE;
+    this._saveCache();
+    this.notify();
+  }
+  _registerQueues(names) {
+    const fresh = uniq(names).filter((n) => !this.availableQueues.includes(n));
+    if (!fresh.length) return;
+    this.settings.customQueues = uniq([...this.settings.customQueues, ...fresh]);
+  }
+
+  // -- Building papers from Zotero data --------------------------------------
+
+  _makePaper(data) {
+    const tags = (data.tags || []).map((t) => t.tag);
+    const { authors, editors } = splitCreators(data.creators);
+    const selfPdf =
+      data.itemType === "attachment" && data.contentType === "application/pdf"
+        ? data.key
+        : null;
+    return {
+      key: data.key,
+      version: data.version,
+      itemType: data.itemType,
+      title: data.title || "(untitled)",
+      authors,
+      editors,
+      publicationTitle: data.publicationTitle || null,
+      dateString: data.date || null,
+      year: yearOf(data.date),
+      doi: data.doi || data.DOI || null,
+      url: data.url || null,
+      pages: data.pages || null,
+      pageCount: pageCount(data.pages),
+      tags,
+      collectionKeys: data.collections || [],
+      addedAt: data.dateAdded || null,
+      pdfAttachmentKey: selfPdf,
+      // derived state (filled by _deriveState)
+      readStatus: "unread",
+      queueStatus: null,
+      queueName: null,
+      readDate: null,
+      sortPriority: Infinity,
+      isPending: false,
+    };
+  }
+
+  _deriveState(paper) {
+    const tags = paper.tags;
+    const read = isReadTag(tags);
+    const skipped = tags.includes(Tags.skip);
+    const queued = tags.includes(Tags.queue);
+    paper.readStatus = read ? "read" : skipped ? "skipped" : "unread";
+    paper.readDate = read ? parseReadDate(tags) : null;
+    paper.sortPriority = parsePos(tags) ?? Infinity;
+
+    if (read) {
+      paper.queueStatus = "read";
+      paper.queueName = null;
+      paper.isPending = false;
+    } else if (skipped) {
+      paper.queueStatus = "skipped";
+      paper.queueName = null;
+      paper.isPending = false;
+    } else if (queued) {
+      paper.queueName = parseQueueName(tags);
+      paper.queueStatus = "pending";
+      paper.isPending = true;
+    } else {
+      paper.queueStatus = null;
+      paper.queueName = null;
+      paper.isPending = false;
+    }
+  }
+
+  reconcile(items, { replaceAll = true, deletedKeys = [] } = {}) {
+    const tops = items.filter((i) => !i.data.parentItem);
+    const incomingKeys = new Set(tops.map((i) => i.data.key));
+    const discovered = [];
+
+    for (const item of tops) {
+      const data = item.data;
+      const fresh = this._makePaper(data);
+      const existing = this.papers.get(data.key);
+      // Keep a lazily-resolved PDF key if we already had one.
+      if (existing?.pdfAttachmentKey && !fresh.pdfAttachmentKey) {
+        fresh.pdfAttachmentKey = existing.pdfAttachmentKey;
+      }
+      this.papers.set(data.key, fresh);
+
+      // Items with an in-flight write keep their optimistic state this pass.
+      if (this.pendingWrites.has(data.key) && existing) {
+        fresh.readStatus = existing.readStatus;
+        fresh.queueStatus = existing.queueStatus;
+        fresh.queueName = existing.queueName;
+        fresh.readDate = existing.readDate;
+        fresh.sortPriority = existing.sortPriority;
+        fresh.isPending = existing.isPending;
+        fresh.tags = existing.tags;
+        continue;
+      }
+      this._deriveState(fresh);
+      if (fresh.isPending && fresh.queueName) discovered.push(fresh.queueName);
+    }
+
+    if (replaceAll) {
+      for (const key of [...this.papers.keys()]) {
+        if (!incomingKeys.has(key)) this.papers.delete(key);
+      }
+    } else {
+      for (const key of deletedKeys) this.papers.delete(key);
+    }
+
+    this._registerQueues(discovered);
+    this._saveCache();
+  }
+
+  // -- Sync ------------------------------------------------------------------
+
+  async loadConfig() {
+    this.config = await api.config();
+    return this.config;
+  }
+
+  async syncLibrary({ silent = false } = {}) {
+    if (!this.config.connected) return;
+    if (!silent) {
+      this.isSyncing = true;
+      this.syncProgress = 0;
+      this.lastError = null;
+      this.notify();
+    }
+    try {
+      const since = this.baselineVersion;
+      const result = await api.library(since);
+      if (result.notModified) {
+        // Nothing changed remotely — nothing to do.
+      } else if (since != null) {
+        this.reconcile(result.items, {
+          replaceAll: false,
+          deletedKeys: result.deleted || [],
+        });
+        this.baselineVersion = result.version ?? this.baselineVersion;
+      } else {
+        this.reconcile(result.items, { replaceAll: true });
+        this.baselineVersion = result.version ?? this.baselineVersion;
+      }
+      this._saveCache();
+    } catch (err) {
+      // A failed incremental read: drop the baseline and try a clean full sync.
+      if (this.baselineVersion != null) {
+        this.baselineVersion = null;
+        try {
+          const result = await api.library(null);
+          this.reconcile(result.items, { replaceAll: true });
+          this.baselineVersion = result.version ?? null;
+          this._saveCache();
+          this.lastError = null;
+          return;
+        } catch {
+          /* fall through to error */
+        }
+      }
+      this.lastError = err.message || "Sync failed.";
+    } finally {
+      if (!silent) {
+        this.isSyncing = false;
+        this.syncProgress = null;
+      }
+      this.notify();
+    }
+  }
+
+  // -- Mutations -------------------------------------------------------------
+
+  desiredTags(base, { queued, read, skipped, pos, queueName }) {
+    let tags = base.filter((t) => !t.startsWith("pq:"));
+    if (queued) {
+      tags.push(Tags.queue);
+      if (pos != null) tags.push(Tags.posPrefix + String(Math.trunc(pos)));
+      if (queueName) tags.push(Tags.qnamePrefix + queueName);
+    }
+    if (read) {
+      tags.push(Tags.read + ":" + todayTag());
+      tags.push(...this.settings.readExtraTags);
+    }
+    if (skipped) tags.push(Tags.skip);
+    return uniq(tags);
+  }
+
+  _nextPosition(stored) {
+    let max = 0;
+    for (const p of this.papers.values()) {
+      if (p.isPending && p.queueName === stored && p.sortPriority < Infinity) {
+        max = Math.max(max, p.sortPriority);
+      }
+    }
+    return max + Tags.posGap;
+  }
+
+  async _applyState(paper, { queued, read, skipped, pos, queueName }) {
+    const tags = this.desiredTags(paper.tags, {
+      queued, read, skipped, pos, queueName,
+    });
+    paper.tags = tags;
+    this._saveCache();
+    this.notify();
+    await this._writeTags(paper.key, tags);
+  }
+
+  async _writeTags(key, tags) {
+    this.pendingWrites.add(key);
+    try {
+      await api.setTags(key, tags);
+    } catch (err) {
+      this.lastError = err.message || "Couldn't save to Zotero.";
+      this.notify();
+      // Reconcile against the truth so the UI doesn't lie.
+      this.syncLibrary({ silent: true });
+    } finally {
+      // Hold the guard briefly so a live-sync echo doesn't clobber the write
+      // before Zotero has propagated it.
+      setTimeout(() => this.pendingWrites.delete(key), 1500);
+    }
+  }
+
+  addToQueue(paper, queue = DEFAULT_QUEUE) {
+    const stored = this.storedName(queue);
+    const pos = this._nextPosition(stored);
+    paper.readStatus = "unread";
+    paper.queueStatus = "pending";
+    paper.queueName = stored;
+    paper.readDate = null;
+    paper.isPending = true;
+    paper.sortPriority = pos;
+    this._applyState(paper, {
+      queued: true, read: false, skipped: false, pos, queueName: stored,
+    });
+  }
+  moveToQueue(paper, queue) {
+    this.addToQueue(paper, queue);
+  }
+  markRead(paper) {
+    paper.readStatus = "read";
+    paper.queueStatus = "read";
+    paper.queueName = null;
+    paper.readDate = new Date();
+    paper.isPending = false;
+    this._applyState(paper, {
+      queued: false, read: true, skipped: false, pos: null, queueName: null,
+    });
+  }
+  skip(paper) {
+    paper.readStatus = "skipped";
+    paper.queueStatus = "skipped";
+    paper.queueName = null;
+    paper.readDate = null;
+    paper.isPending = false;
+    this._applyState(paper, {
+      queued: false, read: false, skipped: true, pos: null, queueName: null,
+    });
+  }
+  reset(paper) {
+    this.addToQueue(paper);
+  }
+  removeFromQueue(paper) {
+    this._clear(paper);
+  }
+  removeFromHistory(paper) {
+    this._clear(paper);
+  }
+  _clear(paper) {
+    paper.readStatus = "unread";
+    paper.queueStatus = null;
+    paper.queueName = null;
+    paper.readDate = null;
+    paper.isPending = false;
+    this._applyState(paper, {
+      queued: false, read: false, skipped: false, pos: null, queueName: null,
+    });
+  }
+  /** Moves the paper into the built-in "Postponed" list. It stays there (a real
+   *  queued item, tagged pq:qname:Postponed) until the user returns it to a
+   *  reading queue. Syncs across devices like any other queue. */
+  postpone(paper) {
+    this.addToQueue(paper, POSTPONED_QUEUE);
+  }
+  /** Returns a postponed paper to the Default reading queue. */
+  returnToQueue(paper) {
+    this.addToQueue(paper, DEFAULT_QUEUE);
+  }
+
+  reorderPending(ordered) {
+    const writes = [];
+    ordered.forEach((paper, index) => {
+      const newPos = (index + 1) * Tags.posGap;
+      if (paper.sortPriority === newPos) return;
+      paper.sortPriority = newPos;
+      const tags = this.desiredTags(paper.tags, {
+        queued: true, read: false, skipped: false, pos: newPos,
+        queueName: paper.queueName,
+      });
+      paper.tags = tags;
+      writes.push([paper.key, tags]);
+    });
+    this._saveCache();
+    this.notify();
+    for (const [key, tags] of writes) this._writeTags(key, tags);
+  }
+
+  /** Adds a Zotero item picked from a collection to a queue. */
+  enqueue(rawItem, queue = DEFAULT_QUEUE) {
+    let paper = this.papers.get(rawItem.data.key);
+    if (!paper) {
+      paper = this._makePaper(rawItem.data);
+      this.papers.set(paper.key, paper);
+    }
+    this.addToQueue(paper, queue);
+  }
+
+  isQueued(key) {
+    const p = this.papers.get(key);
+    return !!(p && p.isPending);
+  }
+
+  async addByDOI(doi) {
+    try {
+      await api.addByDOI(doi);
+    } catch (err) {
+      this.lastError = err.message || "Could not add that paper.";
+      return false;
+    }
+    await this.syncLibrary();
+    return true;
+  }
+
+  // -- Settings --------------------------------------------------------------
+
+  setDailyGoal(n) {
+    this.settings.dailyGoal = Math.max(1, Number(n) || 1);
+    this._saveCache();
+    this.notify();
+  }
+  setReadExtraTags(tags) {
+    this.settings.readExtraTags = uniq(tags);
+    this._saveCache();
+    this.notify();
+  }
+
+  // -- Derived collections for views ----------------------------------------
+
+  pendingInQueue(queueName) {
+    const stored = queueName === DEFAULT_QUEUE ? null : queueName;
+    return [...this.papers.values()]
+      .filter((p) => p.isPending && p.queueName === stored)
+      .sort((a, b) => a.sortPriority - b.sortPriority || a.key.localeCompare(b.key));
+  }
+  pendingInActiveQueue() {
+    return this.pendingInQueue(this.activeQueue);
+  }
+  allPapers() {
+    return [...this.papers.values()];
+  }
+  history() {
+    return [...this.papers.values()]
+      .filter((p) => p.readStatus === "read")
+      .sort((a, b) => {
+        const da = (a.readDate ? new Date(a.readDate).getTime() : 0);
+        const db = (b.readDate ? new Date(b.readDate).getTime() : 0);
+        return db - da;
+      });
+  }
+}

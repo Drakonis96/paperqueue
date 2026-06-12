@@ -1,0 +1,23 @@
+# Keep the build context (and image) to just what the server needs.
+# The Dockerfile only COPYs package.json, package-lock.json, src/ and public/.
+
+# Dependencies / build artifacts — reinstalled inside the image
+node_modules
+npm-debug.log
+
+# Secrets & local env
+.env
+.env.local
+
+# Compose / deploy / docs — not needed at runtime
+docker-compose.yml
+docker-compose.local.yml
+.dockerignore
+Dockerfile
+README.md
+
+# VCS / tooling / OS noise
+.git
+.gitignore
+*.log
+.DS_Store

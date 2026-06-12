@@ -6,14 +6,22 @@
 
 <p align="center"><i>Read more of your Zotero library, with less friction.</i></p>
 
-PaperQueue is a native **iOS · iPadOS · macOS** app (SwiftUI) that turns your
-[Zotero](https://www.zotero.org) library into a **focused, curated reading
-queue**. Zotero is great for organizing references, but not for the daily flow
-of *"what do I read today?" → "read it" → "next."* PaperQueue is built for that.
+PaperQueue turns your [Zotero](https://www.zotero.org) library into a
+**focused, curated reading queue**. Zotero is great for organizing references,
+but not for the daily flow of *"what do I read today?" → "read it" → "next."*
+PaperQueue is built for that.
 
-> **Serverless by design.** The app talks **directly** to the Zotero Web API
-> (or your local Zotero) — there is no backend to run. Queue state lives in
-> Zotero **tags**, so it syncs across your devices automatically.
+It comes in **three flavours**, all sharing the same state through Zotero tags,
+so a queue you build in one shows up in the others:
+
+- **iOS · iPadOS · macOS** — a native SwiftUI app.
+- **Web (self-hosted)** — a single-port web server you run yourself; the same
+  features, in any browser. See [`web/`](web/).
+
+> **Serverless by design.** The native app talks **directly** to the Zotero Web
+> API (or your local Zotero) — no backend. The web edition is a thin, key-holding
+> proxy you self-host. Either way, queue state lives in Zotero **tags**, so it
+> syncs across your devices automatically.
 
 ## Features
 
@@ -74,6 +82,18 @@ Your API key is stored only in the device **Keychain** and sent as the
 
 ## Install
 
+### Web (self-hosted) — one port, one service
+Run PaperQueue in your browser on any machine. The Zotero key lives only on the
+server (set it via `.env` or docker-compose); no IP wrangling.
+
+```bash
+cd web
+echo "ZOTERO_API_KEY=your_key_here" > .env   # or leave blank for a demo library
+docker compose up -d                          # → http://localhost:5954
+```
+
+Full instructions and configuration in [`web/README.md`](web/README.md).
+
 ### macOS (`PaperQueue.dmg`)
 Download from [Releases](https://github.com/Drakonis96/paperqueue/releases),
 open the DMG and drag PaperQueue to Applications. The build is **unsigned**, so
@@ -116,18 +136,22 @@ the YAML and re-run `xcodegen generate`.
 
 ```
 PaperQueue/
-├── app/                       # SwiftUI app (iOS + macOS) — the product
+├── app/                       # SwiftUI app (iOS + macOS) — the native product
 │   ├── project.yml            # XcodeGen project definition
 │   ├── PaperQueue/            # app sources (App, Auth, Networking, Persistence, Features…)
 │   ├── PaperQueueWidget/      # WidgetKit extension
 │   └── Shared/                # code shared with the widget (App Group snapshot)
-├── server/                    # legacy Fastify+SQLite backend — NOT used (serverless app)
+├── web/                       # self-hosted web edition (Node + browser, single port)
+│   ├── src/                   # Express service: static UI + Zotero proxy + live SSE
+│   ├── public/                # the browser app (vanilla JS, no build step)
+│   └── docker-compose.yml
+├── server/                    # legacy Fastify+SQLite backend — NOT used (superseded by web/)
 ├── altstore-source.json       # AltStore/SideStore source
 └── logo.png
 ```
 
-> `server/` was an earlier OAuth-broker design. The app is now serverless, so
-> it's kept only for reference / a possible future web client.
+> `server/` was an earlier OAuth-broker design, kept only for reference. The
+> self-hosted web client now lives in [`web/`](web/).
 
 ## License
 

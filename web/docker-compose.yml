@@ -1,0 +1,22 @@
+# PaperQueue — web edition · SERVER deployment.
+# Pulls the prebuilt image from Docker Hub. One service, one port.
+#
+#   docker compose up -d        →  open http://localhost:5954
+#   docker compose pull && up   →  update to the latest image
+#
+# Put your Zotero key in a `.env` file next to this one (ZOTERO_API_KEY=...) or
+# in the environment. Leave it blank to try the built-in demo library first.
+
+services:
+  paperqueue:
+    image: drakonis96/paperqueue:latest
+    container_name: paperqueue
+    restart: unless-stopped
+    ports:
+      - "5954:5954"
+    environment:
+      # Create one at https://www.zotero.org/settings/keys/new (read & write).
+      ZOTERO_API_KEY: ${ZOTERO_API_KEY:-}
+      PORT: "5954"
+      # Read a group library instead of your personal one (optional):
+      # ZOTERO_LIBRARY: groups/123456

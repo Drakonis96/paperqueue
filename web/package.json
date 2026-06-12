@@ -1,0 +1,19 @@
+{
+  "name": "paperqueue-web",
+  "version": "1.10.0",
+  "private": true,
+  "description": "PaperQueue for the browser — a single-port web server that turns your Zotero library into a focused reading queue. Same features as the iOS/macOS apps.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

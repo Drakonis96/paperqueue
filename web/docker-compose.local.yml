@@ -1,0 +1,20 @@
+# PaperQueue — web edition · LOCAL build.
+# Builds the image from the source in this directory instead of pulling from
+# Docker Hub. Use this for development or to run your own modified build.
+#
+#   docker compose -f docker-compose.local.yml up -d --build
+#   → open http://localhost:5954
+#
+# Put your Zotero key in a `.env` file next to this one, or leave it blank to
+# try the built-in demo library first.
+
+services:
+  paperqueue:
+    build: .
+    container_name: paperqueue
+    restart: unless-stopped
+    ports:
+      - "5954:5954"
+    environment:
+      ZOTERO_API_KEY: ${ZOTERO_API_KEY:-}
+      PORT: "5954"
