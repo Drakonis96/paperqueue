@@ -529,7 +529,7 @@ async function runTurn(sel, { contextMode, forceReorder = false, queueItems = nu
     setBubbleText(streamEl, "⚠ " + streamError);
     streamEl.classList.add("error");
   } else {
-    if (textBuf) {
+    if (textBuf && !toolCalls.length) {
       state.messages.push({ role: "assistant", content: textBuf });
     } else if (!toolCalls.length) {
       setBubbleText(streamEl, "(no response)");
@@ -552,10 +552,12 @@ function handleToolCall(call) {
     args = JSON.parse(call.args || "{}");
   } catch {
     addBubble("assistant", "The assistant proposed an action I couldn't read. Try rephrasing.").classList.add("error");
+    console.error("AI tool_call parse error:", call.name, call.args);
     return;
   }
   if (call.name === "propose_queue_additions") renderAdditionsCard(args);
   else if (call.name === "reorder_queue") renderReorderCard(args);
+  else console.warn("AI unknown tool_call:", call.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -573,7 +575,10 @@ function renderAdditionsCard(args) {
     .filter(Boolean);
 
   if (!rows.length) {
-    addBubble("assistant", "I couldn't match those suggestions to your library. Try picking the collection as context first.").classList.add("error");
+    const msg = proposed.length
+      ? `The assistant suggested ${proposed.length} item(s), but none matched your library. Try refreshing the library or picking a different context collection.`
+      : "The assistant didn't suggest any items. Try picking a context collection first.";
+    addBubble("assistant", msg).classList.add("error");
     state.messages.push({ role: "assistant", content: "(No matching items found for the suggestion.)" });
     return;
   }

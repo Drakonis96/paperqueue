@@ -104,7 +104,13 @@ export const api = {
         return onEvent({ type: "error", error: json.error?.message || json.error || "AI error" });
       }
       const choice = json.choices?.[0] || {};
-      onEvent({ type: "delta", delta: choice.delta || {}, finish_reason: choice.finish_reason || null });
+      const delta = choice.delta || {};
+      // Some providers send the completed tool call on the final chunk inside
+      // message.tool_calls rather than delta.tool_calls.
+      if (!delta.tool_calls && Array.isArray(choice.message?.tool_calls)) {
+        delta.tool_calls = choice.message.tool_calls;
+      }
+      onEvent({ type: "delta", delta, finish_reason: choice.finish_reason || null });
     };
 
     for (;;) {
