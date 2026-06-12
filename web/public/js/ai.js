@@ -301,9 +301,10 @@ async function openContextPicker() {
   }
   const selected = new Set(state.contextCollections.map((c) => c.key));
 
-  // Build a tree from the flat list using parent references.
+  // Build a tree from the flat list using parent references, sorted A-Z.
   const map = new Map();
   const roots = [];
+  const sortByName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   for (const c of collections) {
     map.set(c.key, { ...c, children: [] });
   }
@@ -314,6 +315,8 @@ async function openContextPicker() {
       roots.push(c);
     }
   }
+  for (const c of map.values()) c.children.sort(sortByName);
+  roots.sort(sortByName);
 
   function renderTree(nodes, depth) {
     return nodes

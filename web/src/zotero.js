@@ -247,11 +247,23 @@ export class ZoteroClient {
   }
 
   async _collections(path) {
-    const res = await fetch(this._url(path), { headers: this._headers() });
-    if (res.status !== 200) {
-      throw new ZoteroError(res.status, "Couldn't read collections.");
+    const all = [];
+    let start = 0;
+    for (;;) {
+      const params = new URLSearchParams({ limit: String(PAGE_LIMIT), start: String(start) });
+      const res = await fetch(`${this._url(path)}?${params}`, { headers: this._headers() });
+      if (res.status !== 200) {
+        throw new ZoteroError(res.status, "Couldn't read collections.");
+      }
+      const list = await res.json();
+      if (!list.length) break;
+      all.push(...list);
+      const total = Number(res.headers.get("Total-Results")) || start + list.length;
+      if (start + list.length >= total) break;
+      start += PAGE_LIMIT;
     }
-    const list = await res.json();
-    return list.map((c) => ({ key: c.key, name: c.data.name, parent: c.data.parentCollection || null }));
+    return all
+      .map((c) => ({ key: c.key, name: c.data.name, parent: c.data.parentCollection || null }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   }
 }
