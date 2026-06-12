@@ -1916,7 +1916,33 @@ pre.code {
 .ai-pick-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
+}
+.ai-tree-node {
+  /* container */
+}
+.ai-tree-row {
+  display: flex;
+  align-items: center;
+}
+.ai-tree-toggle {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--text-3);
+  flex-shrink: 0;
+  user-select: none;
+  margin-right: 2px;
+}
+.ai-tree-toggle:hover {
+  color: var(--text-1);
+}
+.ai-tree-children {
+  /* hidden attr controls display */
 }
 .ai-pick-row {
   display: flex;
@@ -1926,6 +1952,7 @@ pre.code {
   border-radius: 9px;
   font-size: 13.5px;
   cursor: pointer;
+  flex: 1;
 }
 .ai-pick-row:hover {
   background: var(--hover);

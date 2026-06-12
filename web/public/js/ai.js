@@ -318,10 +318,16 @@ async function openContextPicker() {
   function renderTree(nodes, depth) {
     return nodes
       .map((c) => {
+        const hasChildren = c.children && c.children.length > 0;
         const indent = depth * 18;
+        const toggleHtml = hasChildren
+          ? `<span class="ai-tree-toggle" data-expanded="0">▶</span>`
+          : `<span class="ai-tree-toggle" style="visibility:hidden">▶</span>`;
         return (
-          `<label class="ai-pick-row" style="padding-left:${indent}px"><input type="checkbox" value="${esc(c.key)}" data-name="${esc(c.name)}" ${selected.has(c.key) ? "checked" : ""}/> ${esc(c.name)}</label>` +
-          (c.children.length ? renderTree(c.children, depth + 1) : "")
+          `<div class="ai-tree-node">` +
+          `<div class="ai-tree-row" style="padding-left:${indent}px">${toggleHtml}<label class="ai-pick-row"><input type="checkbox" value="${esc(c.key)}" data-name="${esc(c.name)}" ${selected.has(c.key) ? "checked" : ""}/> ${esc(c.name)}</label></div>` +
+          (hasChildren ? `<div class="ai-tree-children" hidden>${renderTree(c.children, depth + 1)}</div>` : "") +
+          `</div>`
         );
       })
       .join("");
@@ -871,6 +877,18 @@ function openMiniModal(title, bodyHtml, onDone) {
     </div>`;
   const close = () => back.remove();
   back.addEventListener("click", (e) => {
+    const toggle = e.target.closest(".ai-tree-toggle");
+    if (toggle) {
+      const node = toggle.closest(".ai-tree-node");
+      const children = node.querySelector(":scope > .ai-tree-children");
+      if (children) {
+        const expanded = toggle.dataset.expanded === "1";
+        toggle.dataset.expanded = expanded ? "0" : "1";
+        toggle.textContent = expanded ? "▶" : "▼";
+        children.hidden = expanded;
+      }
+      return;
+    }
     if (e.target === back || e.target.closest("[data-mini-close]")) close();
     else if (e.target.closest("[data-mini-done]")) {
       onDone?.(back);
