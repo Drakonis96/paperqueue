@@ -4,7 +4,7 @@
 // add-by-DOI, live sync. Vanilla JS + ES modules, no build step.
 
 import { Store, authorLine, subtitle, POSTPONED_QUEUE } from "./store.js";
-import { computeStats, dayStatus, dayKey } from "./stats.js";
+import { computeStats, dayStatus, dayKey, startOfDay } from "./stats.js";
 import { api } from "./api.js";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +34,7 @@ const ICONS = {
   chevron: '<polyline points="6 9 12 15 18 9"/>',
   chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
+  chevronUp: '<polyline points="18 15 12 9 6 15"/>',
   external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
   grip: '<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/>',
   flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
@@ -99,6 +100,9 @@ const ui = {
   years: new Set(),
   collections: [], // cached flat list
   historySearch: "",
+  historyRange: "all", // all | today | week | month | year | custom
+  historyFrom: "", // YYYY-MM-DD (custom range)
+  historyTo: "",
   // Stats calendar: first day of the displayed month (defaults to this month).
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
 };
@@ -234,6 +238,7 @@ function shell() {
       <div class="content">${view()}</div>
     </main>
     <nav class="bottom-nav">${navButtons("bottom", true)}</nav>
+    <button class="fab-top" data-act="scrollTop" aria-label="Scroll to top" title="Scroll to top">${I("chevronUp", 22)}</button>
   </div>`;
 }
 
@@ -281,7 +286,7 @@ function view() {
 // ---------------------------------------------------------------------------
 // Paper row
 // ---------------------------------------------------------------------------
-function paperRow(p, { position, actions = "", draggable = false, showStatus = false } = {}) {
+function paperRow(p, { position, actions = "", draggable = false, showStatus = false, meta = null } = {}) {
   const pdf = p.pdfAttachmentKey ? "pdf" : "";
   const posBadge =
     position != null
@@ -307,6 +312,7 @@ function paperRow(p, { position, actions = "", draggable = false, showStatus = f
       <div class="title">${esc(p.title)}</div>
       <div class="meta">${esc(authorLine(p))}</div>
       ${sub ? `<div class="meta2">${esc(sub)}</div>` : ""}
+      ${meta ? `<div class="meta2 read-meta">${I("clock", 12)} ${esc(meta)}</div>` : ""}
     </div>
     <div class="actions">${statusBadge}${actions}</div>
   </div>`;
@@ -531,35 +537,94 @@ function chip(type, value, label) {
 // ---------------------------------------------------------------------------
 // History view
 // ---------------------------------------------------------------------------
+const HISTORY_RANGES = {
+  all: "All time",
+  today: "Today",
+  week: "This week",
+  month: "This month",
+  year: "This year",
+  custom: "Custom dates…",
+};
+
+function historyDateMatch(p) {
+  const range = ui.historyRange;
+  if (range === "all") return true;
+  const d = p.readDate ? new Date(p.readDate) : null;
+  if (!d) return false;
+  const day = startOfDay(d);
+  const now = new Date();
+  if (range === "today") return day.getTime() === startOfDay(now).getTime();
+  if (range === "week") {
+    const ws = startOfDay(now);
+    ws.setDate(ws.getDate() - ((ws.getDay() + 6) % 7)); // Monday
+    return day >= ws;
+  }
+  if (range === "month")
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  if (range === "year") return d.getFullYear() === now.getFullYear();
+  if (range === "custom") {
+    if (ui.historyFrom && day < startOfDay(new Date(ui.historyFrom + "T00:00:00")))
+      return false;
+    if (ui.historyTo && day > startOfDay(new Date(ui.historyTo + "T00:00:00")))
+      return false;
+    return true;
+  }
+  return true;
+}
+
 function historyView() {
-  let papers = store.history();
+  if (!store.history().length) {
+    return empty("history", "Nothing read yet", "Papers you finish show up here.");
+  }
+
+  let papers = store.history().filter(historyDateMatch);
   if (ui.historySearch) {
     const q = ui.historySearch.toLowerCase();
     papers = papers.filter(
       (p) => p.title.toLowerCase().includes(q) || authorLine(p).toLowerCase().includes(q)
     );
   }
-  if (!store.history().length) {
-    return empty("history", "Nothing read yet", "Papers you finish show up here.");
-  }
+
+  const rangeActive = ui.historyRange !== "all";
+  const customRow =
+    ui.historyRange === "custom"
+      ? `<div class="toolbar" style="margin-top:-6px">
+          <label class="date-field">From <input type="date" id="hist-from" value="${attr(ui.historyFrom)}" /></label>
+          <label class="date-field">To <input type="date" id="hist-to" value="${attr(ui.historyTo)}" /></label>
+        </div>`
+      : "";
+
   const rows = papers
     .map((p) =>
       paperRow(p, {
         showStatus: true,
+        meta: p.readDate ? `Read ${formatReadDate(p.readDate)}` : null,
         actions: `
           <button class="act" data-act="reset:${p.key}" title="Send back to queue">${I("uturn", 18)}</button>
           <button class="act red" data-act="removeHistory:${p.key}" title="Remove from history">${I("trash", 18)}</button>`,
       })
     )
     .join("");
+
   return `
     <div class="toolbar">
       <div class="search">${I("search", 17)}<input id="hist-search" type="text" placeholder="Search read papers" value="${attr(ui.historySearch)}" /></div>
+      <select class="select ${rangeActive ? "active" : ""}" id="hist-range">
+        ${Object.entries(HISTORY_RANGES)
+          .map(([k, v]) => `<option value="${k}" ${ui.historyRange === k ? "selected" : ""}>${v}</option>`)
+          .join("")}
+      </select>
     </div>
+    ${customRow}
     <div class="list">
-      <div class="list-head">${papers.length} read</div>
-      ${rows || `<div class="empty"><p>No matches.</p></div>`}
+      <div class="list-head"><span>${papers.length} read${rangeActive ? ` · ${esc(HISTORY_RANGES[ui.historyRange])}` : ""}</span></div>
+      ${rows || `<div class="empty"><p>No reads match your filters.</p></div>`}
     </div>`;
+}
+
+function formatReadDate(d) {
+  const date = new Date(d);
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +707,7 @@ function calendar(s) {
     });
     const isToday = dayKey(d) === dayKey(now);
     const count = s.countsByDay[dayKey(d)] || 0;
-    cells += `<div class="cal-cell ${st}${isToday ? " today" : ""}" title="${dayKey(d)} · ${count} read">${day}</div>`;
+    cells += `<button class="cal-cell ${st}${isToday ? " today" : ""}" data-act="calDay:${dayKey(d)}" title="${dayKey(d)} · ${count} read">${day}</button>`;
   }
 
   return `<div class="card section-card cal-card">
@@ -1042,6 +1107,15 @@ document.addEventListener("change", (e) => {
   } else if (id === "filter-collection") {
     ui.collection = e.target.value || null;
     scheduleRender();
+  } else if (id === "hist-range") {
+    ui.historyRange = e.target.value;
+    scheduleRender();
+  } else if (id === "hist-from") {
+    ui.historyFrom = e.target.value;
+    scheduleRender();
+  } else if (id === "hist-to") {
+    ui.historyTo = e.target.value;
+    scheduleRender();
   }
 });
 
@@ -1239,6 +1313,8 @@ function handleAction(act, target) {
       return;
     case "reminder":
       return enableReminder();
+    case "scrollTop":
+      return window.scrollTo({ top: 0, behavior: "smooth" });
 
     // Stats calendar navigation
     case "calPrev":
@@ -1251,7 +1327,45 @@ function handleAction(act, target) {
       if (next <= new Date(now.getFullYear(), now.getMonth(), 1)) ui.calMonth = next;
       return scheduleRender();
     }
+    case "calDay":
+      return calendarDayModal(key);
   }
+}
+
+/** Lists the papers read on a given calendar day (YYYY-MM-DD). */
+function calendarDayModal(dayKeyStr) {
+  const reads = store
+    .allPapers()
+    .filter(
+      (p) =>
+        p.readStatus === "read" &&
+        p.readDate &&
+        dayKey(new Date(p.readDate)) === dayKeyStr
+    )
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  const dateLabel = new Date(dayKeyStr + "T00:00:00").toLocaleDateString(undefined, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const body = reads.length
+    ? `<div class="menu-list">${reads
+        .map(
+          (p) =>
+            `<button data-act="open:${p.key}"><span style="color:var(--green)">${I("checkCircle", 18)}</span><span style="flex:1;text-align:left;min-width:0"><span style="display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.title)}</span><span style="font-size:12.5px;color:var(--text-3)">${esc(authorLine(p))}</span></span></button>`
+        )
+        .join("")}</div>`
+    : `<div class="empty" style="padding:30px 10px"><div class="ico">${I("book", 30)}</div><p>No papers read on this day.</p></div>`;
+
+  openModal(
+    modalShell(
+      dateLabel,
+      `<div style="font-size:13px;color:var(--text-2);margin-bottom:12px">${reads.length} ${reads.length === 1 ? "paper" : "papers"} read</div>${body}`
+    )
+  );
 }
 
 function decodeArg(parts) {
@@ -1402,8 +1516,21 @@ function scheduleReminderCheck() {
 // ---------------------------------------------------------------------------
 // Drag-to-reorder (queue)
 // ---------------------------------------------------------------------------
+// Floating "scroll to top" button — shown on any tab once you've scrolled down.
+let scrollListenerAttached = false;
+function updateScrollFab() {
+  const fab = $(".fab-top");
+  if (fab) fab.classList.toggle("visible", window.scrollY > 380);
+}
+
 let dragKey = null;
 function bindDynamic() {
+  if (!scrollListenerAttached) {
+    window.addEventListener("scroll", updateScrollFab, { passive: true });
+    scrollListenerAttached = true;
+  }
+  updateScrollFab();
+
   const list = $("#queue-list");
   if (!list) return;
   const rows = list.querySelectorAll(".row[draggable]");

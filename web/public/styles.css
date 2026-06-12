@@ -603,6 +603,43 @@ a {
   font-family: inherit;
 }
 
+.select.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 0 12px;
+  height: 40px;
+}
+.date-field input[type="date"] {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+  color-scheme: light dark;
+}
+.read-meta {
+  color: var(--accent) !important;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.read-meta svg {
+  width: 12px;
+  height: 12px;
+}
+
 .chips {
   display: flex;
   gap: 8px;
@@ -851,17 +888,26 @@ a {
 }
 .cal-cell {
   min-height: 46px;
+  border: none;
   border-radius: 12px;
   display: grid;
   place-items: center;
   font-size: 14px;
   font-weight: 600;
+  font-family: inherit;
   background: var(--card-2);
   color: var(--text-2);
-  transition: transform 0.12s;
+  cursor: pointer;
+  transition: transform 0.12s, filter 0.12s;
+}
+.cal-cell:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
 }
 .cal-cell.empty {
   background: transparent;
+  pointer-events: none;
+  cursor: default;
 }
 .cal-cell.untracked {
   background: var(--card-2);
@@ -1135,6 +1181,35 @@ a {
   width: 100%;
 }
 
+/* ---------- Scroll-to-top FAB ---------- */
+.fab-top {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 60;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(8px) scale(0.9);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s, background 0.15s;
+}
+.fab-top.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.fab-top:hover {
+  background: var(--hover);
+}
+
 /* ---------- Toasts ---------- */
 .toasts {
   position: fixed;
@@ -1323,5 +1398,9 @@ pre.code {
   .hero {
     flex-direction: column;
     text-align: center;
+  }
+  .fab-top {
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    right: 16px;
   }
 }

@@ -1,15 +1,24 @@
+import SwiftData
 import SwiftUI
 
 /// A month calendar where each day is tinted by how it did against the daily
 /// goal: green when met, orange when partial, red when missed. Future and
-/// pre-tracking days stay neutral. Navigable month-by-month.
+/// pre-tracking days stay neutral. Navigable month-by-month. Tapping a day
+/// shows a sheet with the papers read on that day.
 struct StreakCalendarView: View {
     let countsByDay: [String: Int]
     let goal: Int
     let firstActiveDay: Date?
 
+    @Query(
+        filter: #Predicate<CachedPaper> { $0.readStatus == "read" },
+        sort: [SortDescriptor(\CachedPaper.title)]
+    )
+    private var readPapers: [CachedPaper]
+
     @State private var monthAnchor: Date = StatsService.calendar
         .dateInterval(of: .month, for: Date())?.start ?? Date()
+    @State private var selectedDay: Date?
 
     private var cal: Calendar { StatsService.calendar }
 
@@ -25,6 +34,9 @@ struct StreakCalendarView: View {
         .padding()
         .background(Theme.cardBackground, in: RoundedRectangle(
             cornerRadius: Theme.cornerRadius))
+        .sheet(item: $selectedDay) { day in
+            dayReadsSheet(day)
+        }
     }
 
     private var header: some View {
@@ -74,7 +86,9 @@ struct StreakCalendarView: View {
                         count: countsByDay[StatsService.dayKey(day)] ?? 0,
                         status: StatsService.status(
                             for: day, countsByDay: countsByDay, goal: goal,
-                            firstActiveDay: firstActiveDay))
+                            firstActiveDay: firstActiveDay),
+                        onTap: { selectedDay = day }
+                    )
                 } else {
                     Color.clear.frame(height: 34)
                 }
@@ -110,11 +124,12 @@ struct StreakCalendarView: View {
         return result
     }
 
-    private var weekdaySymbols: [String] {
-        let base = cal.veryShortWeekdaySymbols // [Sun, Mon, …]
+    private let weekdaySymbols: [String] = {
+        let cal = StatsService.calendar
+        let base = cal.veryShortWeekdaySymbols
         let start = cal.firstWeekday - 1
         return (0..<7).map { base[($0 + start) % 7] }
-    }
+    }()
 
     private var monthTitle: String {
         let f = DateFormatter()
@@ -134,17 +149,89 @@ struct StreakCalendarView: View {
     private func shiftMonth(_ delta: Int) {
         guard let next = cal.date(
             byAdding: .month, value: delta, to: monthAnchor) else { return }
-        // Don't navigate past the current month.
         let nowMonth = cal.dateInterval(of: .month, for: Date())?.start ?? Date()
         if delta > 0 && next > nowMonth { return }
         monthAnchor = next
     }
+
+    // MARK: - Day tap sheet
+
+    private func papersForDay(_ day: Date) -> [CachedPaper] {
+        let key = StatsService.dayKey(day)
+        return readPapers.filter { paper in
+            guard let d = paper.readDate else { return false }
+            return StatsService.dayKey(d) == key
+        }
+    }
+
+    private func dayReadsSheet(_ day: Date) -> some View {
+        let papers = papersForDay(day)
+        let dateLabel = day.formatted(
+            Date.FormatStyle()
+                .weekday(.wide)
+                .year(.defaultDigits)
+                .month(.wide)
+                .day(.defaultDigits))
+
+        return NavigationStack {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(papers.count) \(papers.count == 1 ? "paper" : "papers") read")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+
+                if papers.isEmpty {
+                    ContentUnavailableView(
+                        "No papers read",
+                        systemImage: "book",
+                        description: Text("Nothing was read on this day."))
+                } else {
+                    List {
+                        ForEach(papers) { paper in
+                            NavigationLink(value: QueueRoute.detail(paper.zoteroKey)) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(paper.title)
+                                        .font(.headline)
+                                        .lineLimit(2)
+                                    Text(paper.authorLine)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(dateLabel)
+            #if !os(macOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .navigationDestination(for: QueueRoute.self) { route in
+                switch route {
+                case let .detail(key): PaperDetailView(paperKey: key)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { selectedDay = nil }
+                }
+            }
+        }
+    }
+}
+
+extension Date: @retroactive Identifiable {
+    public var id: TimeInterval { timeIntervalSince1970 }
 }
 
 private struct DayCell: View {
     let date: Date
     let count: Int
     let status: DayStatus
+    var onTap: (() -> Void)? = nil
 
     private var dayNumber: String {
         "\(StatsService.calendar.component(.day, from: date))"
@@ -183,6 +270,10 @@ private struct DayCell: View {
                     RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(Theme.accent, lineWidth: 2)
                 }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .onTapGesture {
+                onTap?()
             }
     }
 }
