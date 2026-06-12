@@ -5,10 +5,9 @@ iOS/macOS apps — the reading queue, library, collections, history, stats and
 **live sync** — but it runs in your browser, so it's roomy and works on any
 device on your network.
 
-> **One service, one port.** No IP wrangling, no extra moving parts. The Zotero
-> key lives only on the server (set it via `.env` or docker-compose); the
-> browser only ever talks to this server. State is stored in Zotero **tags**, so
-> a queue you build here shows up on your phone and Mac too.
+> Set the Zotero key via `.env` or docker-compose; the browser only ever talks
+> to this server. State is stored in Zotero **tags**, so a queue you build here
+> shows up on your phone and Mac too.
 
 <p align="center"><code>http://localhost:5954</code></p>
 
@@ -68,7 +67,7 @@ iPhone/iPad app and the Mac app all stay in lock-step.
 | Variable          | Default                   | What it does                                            |
 | ----------------- | ------------------------- | ------------------------------------------------------- |
 | `ZOTERO_API_KEY`  | *(demo mode)*             | Your Zotero Web API key. The only thing usually needed. |
-| `PORT`            | `5954`                    | Port the single service listens on.                     |
+| `PORT`            | `5954`                    | Port the server listens on.                             |
 | `ZOTERO_LIBRARY`  | *(your user library)*     | Read a group library instead, e.g. `groups/123456`.     |
 | `ZOTERO_USER_ID`  | *(resolved from the key)* | Override the user id (rarely needed).                   |
 | `ZOTERO_API_BASE` | `https://api.zotero.org`  | Override the Zotero API endpoint (proxies).             |

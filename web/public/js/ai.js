@@ -445,26 +445,31 @@ export async function addSuggestions() {
     : `<div class="ai-muted">No collections in this library.</div>`;
 
   // Optional tag exclusions: any candidate carrying one of these tags is dropped
-  // before it ever reaches the model.
+  // before it ever reaches the model. Always shown (with an empty state) so the
+  // filter is discoverable; the collections list above is height-bounded so this
+  // section stays visible without scrolling past a long collection tree.
   const tags = store.libraryTags();
-  const excludeSection = tags.length
-    ? `<div class="ai-exclude">
+  const excludeSection = `<div class="ai-exclude">
          <label class="ai-field-label">Exclude papers tagged (optional)</label>
-         <div class="ai-muted" style="margin:2px 0 8px">Suggestions carrying any selected tag are filtered out.</div>
-         <div class="ai-xtags">${tags
-           .map((t) => `<button type="button" class="ai-xtag" data-xtag="${esc(t)}">${esc(t)}</button>`)
-           .join("")}</div>
-       </div>`
-    : "";
+         <div class="ai-muted" style="margin:2px 0 8px">Tap tags to drop any suggestion that carries them.</div>
+         ${
+           tags.length
+             ? `<div class="ai-xtags">${tags
+                 .map((t) => `<button type="button" class="ai-xtag" data-xtag="${esc(t)}">${esc(t)}</button>`)
+                 .join("")}</div>`
+             : `<div class="ai-muted">No tags in your library yet.</div>`
+         }
+       </div>`;
 
   const modal = openPickerModal(
     "Suggest with AI",
     `<div class="ai-muted" style="margin-bottom:10px">Pick one or more collections to suggest papers from.</div>
-     <div style="margin:12px 0">
+     <div style="margin:0 0 12px">
        <label class="ai-field-label">Number of suggestions</label>
        <input type="number" class="ai-count-input" min="1" max="50" value="5" data-ai-count style="width:80px">
      </div>
-     <div class="ai-pick-list">${tree}</div>
+     <label class="ai-field-label">Collections</label>
+     <div class="ai-pick-list" style="max-height:210px;overflow-y:auto">${tree}</div>
      ${excludeSection}`,
     async (root) => {
       const picked = [...root.querySelectorAll('.ai-pick-list input[type="checkbox"]:checked')].map((cb) => ({
