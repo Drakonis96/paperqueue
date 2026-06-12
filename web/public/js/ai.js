@@ -845,7 +845,9 @@ function setBubbleText(el, text) {
   el.textContent = text;
 }
 function scrollToBottom() {
-  elMessages.scrollTop = elMessages.scrollHeight;
+  requestAnimationFrame(() => {
+    elMessages.scrollTo({ top: elMessages.scrollHeight, behavior: "auto" });
+  });
 }
 
 function renderEmptyState() {
