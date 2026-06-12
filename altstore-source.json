@@ -24,7 +24,7 @@
           "date": "2026-06-12",
           "localizedDescription": "• PaperQueue now also runs in your browser — a new self-hosted web edition with the same reading queue, library, history and stats, kept in sync with this app through Zotero tags. Find it in the project's web/ folder (one Docker command, single port).\n• Postpone now has a home: postponed papers move into a built-in \"Postponed\" list and wait there until you put them back in a queue.\n• Version numbers are now aligned across iPhone, iPad, Mac and web. No functional changes to the iOS/iPadOS app itself in this release.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.10.0/PaperQueue-unsigned.ipa",
-          "size": 1496625,
+          "size": 1496627,
           "minOSVersion": "17.0"
         },
         {
