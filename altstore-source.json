@@ -24,7 +24,7 @@
           "date": "2026-06-12",
           "localizedDescription": "Web edition only in this release — no functional changes to the iPhone/iPad app; the version is kept aligned across platforms.\n\n• Order with AI now opens its model picker reliably instead of failing silently.\n• Suggest with AI now keeps the picker visible and shows an immediate working state while suggestions are being prepared.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.18.0/PaperQueue-unsigned.ipa",
-          "size": 0,
+          "size": 1519038,
           "minOSVersion": "17.0"
         },
         {
