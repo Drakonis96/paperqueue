@@ -971,7 +971,8 @@ function weeklyChart(s, kind) {
 // ---------------------------------------------------------------------------
 function settingsView() {
   const goal = store.settings.dailyGoal;
-  const tags = store.settings.readExtraTags;
+  const addTags = store.settings.readExtraTags;
+  const removeTags = store.settings.readRemoveTags || [];
   const demo = store.config.demo;
 
   const account = `
@@ -1022,14 +1023,30 @@ function settingsView() {
       </div>
     </div>`;
 
+  const readTagGroup = (mode, list, emptyText) => `
+      <div>
+        ${
+          list.length
+            ? list
+                .map(
+                  (t) =>
+                    `<span class="tag-pill sel">${I("tag", 13)} ${esc(t)} <button data-act="removeReadTag:${mode}:${attr(t)}" style="border:none;background:none;color:inherit;cursor:pointer;padding:0">${I("x", 12)}</button></span>`
+                )
+                .join("")
+            : `<span style="font-size:13px;color:var(--text-3)">${esc(emptyText)}</span>`
+        }
+      </div>
+      <button class="btn sm" style="margin-top:12px" data-act="pickReadTags:${mode}">${I("tag", 15)} Choose tags…</button>`;
+
   const tagSection = `
     <div class="card settings-section">
       <h3>Tags on read</h3>
-      <div style="font-size:13px;color:var(--text-2);margin-bottom:10px">When you mark a paper read, these Zotero tags are added alongside PaperQueue's own tag.</div>
-      <div>
-        ${tags.length ? tags.map((t) => `<span class="tag-pill sel">${I("tag", 13)} ${esc(t)} <button data-act="removeReadTag:${attr(t)}" style="border:none;background:none;color:inherit;cursor:pointer;padding:0">${I("x", 12)}</button></span>`).join("") : `<span style="font-size:13px;color:var(--text-3)">No extra tags.</span>`}
-      </div>
-      <button class="btn sm" style="margin-top:12px" data-act="addReadTags">${I("tag", 15)} Choose tags…</button>
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px">When you mark a paper read, PaperQueue can automatically <b>add</b> some Zotero tags and <b>remove</b> others (removal only applies if the paper already has them). Use either, or both.</div>
+      <div style="font-weight:650;font-size:13px;color:var(--green);margin-bottom:8px">${I("plus", 14)} Add when read</div>
+      ${readTagGroup("add", addTags, "No tags added on read.")}
+      <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
+      <div style="font-weight:650;font-size:13px;color:var(--red);margin-bottom:8px">${I("minusCircle", 14)} Remove when read</div>
+      ${readTagGroup("remove", removeTags, "No tags removed on read.")}
     </div>`;
 
   const how = `
@@ -1514,18 +1531,36 @@ async function detailModal(key) {
   );
 }
 
-function tagPickerModal() {
+function tagPickerModal(mode = "add") {
   const allTags = uniqueSorted(
     store.allPapers().flatMap((p) => p.tags).filter((t) => !t.startsWith("pq:") && !t.startsWith("_"))
   );
-  const sel = new Set(store.settings.readExtraTags);
+  const sel = new Set(
+    mode === "remove" ? store.settings.readRemoveTags || [] : store.settings.readExtraTags
+  );
+  // The opposite list — shown disabled so a tag can never be both added and
+  // removed on read at once.
+  const other = new Set(
+    mode === "remove" ? store.settings.readExtraTags : store.settings.readRemoveTags || []
+  );
+  const title = mode === "remove" ? "Remove on read" : "Add on read";
+  const hint =
+    mode === "remove"
+      ? "Pick tags to strip when a paper is marked read (only if it has them)."
+      : "Pick tags to add automatically when a paper is marked read.";
   openModal(
     modalShell(
-      "Tags on read",
-      `<div class="hint" style="margin-bottom:12px">Pick tags to add automatically when a paper is marked read.</div>
+      title,
+      `<div class="hint" style="margin-bottom:12px">${hint}</div>
        <div style="max-height:320px;overflow:auto">${
          allTags.length
-           ? allTags.map((t) => `<button class="tag-pill ${sel.has(t) ? "sel" : ""}" data-act="toggleReadTag:${attr(t)}">${esc(t)}</button>`).join("")
+           ? allTags
+               .map((t) => {
+                 if (other.has(t))
+                   return `<span class="tag-pill" style="opacity:.4" title="Already in the ${mode === "remove" ? "add" : "remove"} list">${esc(t)}</span>`;
+                 return `<button class="tag-pill ${sel.has(t) ? "sel" : ""}" data-act="toggleReadTag:${mode}:${attr(t)}">${esc(t)}</button>`;
+               })
+               .join("")
            : `<span style="color:var(--text-3)">No tags in your library yet.</span>`
        }</div>`,
       `<button class="btn primary" data-act="closeModal">Done</button>`
@@ -1974,13 +2009,18 @@ function handleAction(act, target) {
       return store.setDailyGoal(store.settings.dailyGoal + 1);
     case "goalDec":
       return store.setDailyGoal(store.settings.dailyGoal - 1);
-    case "addReadTags":
-      return tagPickerModal();
+    case "pickReadTags":
+      return tagPickerModal(rest[0] === "remove" ? "remove" : "add");
     case "toggleReadTag":
-      return toggleReadTag(decodeArg(rest));
-    case "removeReadTag":
-      store.setReadExtraTags(store.settings.readExtraTags.filter((t) => t !== decodeArg(rest)));
+      return toggleReadTag(rest[0], decodeArg(rest.slice(1)));
+    case "removeReadTag": {
+      const mode = rest[0];
+      const tag = decodeArg(rest.slice(1));
+      if (mode === "remove")
+        store.setReadRemoveTags((store.settings.readRemoveTags || []).filter((t) => t !== tag));
+      else store.setReadExtraTags(store.settings.readExtraTags.filter((t) => t !== tag));
       return;
+    }
     case "reminder":
       return enableReminder();
     case "scrollTop":
@@ -2148,12 +2188,22 @@ function toggleFilter(type, value) {
   scheduleRender();
 }
 
-function toggleReadTag(tag) {
-  const cur = new Set(store.settings.readExtraTags);
+function toggleReadTag(mode, tag) {
+  const isRemove = mode === "remove";
+  const cur = new Set(isRemove ? store.settings.readRemoveTags || [] : store.settings.readExtraTags);
   if (cur.has(tag)) cur.delete(tag);
   else cur.add(tag);
-  store.setReadExtraTags([...cur]);
-  tagPickerModal(); // refresh selection state
+  if (isRemove) {
+    store.setReadRemoveTags([...cur]);
+    // A tag is never in both lists: clear it from the add list if just added.
+    if (cur.has(tag))
+      store.setReadExtraTags(store.settings.readExtraTags.filter((t) => t !== tag));
+  } else {
+    store.setReadExtraTags([...cur]);
+    if (cur.has(tag))
+      store.setReadRemoveTags((store.settings.readRemoveTags || []).filter((t) => t !== tag));
+  }
+  tagPickerModal(mode); // refresh selection state
 }
 
 async function enqueueFromCollections(key, target) {

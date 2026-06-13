@@ -41,7 +41,11 @@ function defaultSettings() {
     customQueues: [],
     activeQueue: DEFAULT_QUEUE,
     dailyGoal: 1,
+    // Tags applied when a paper is marked read: `readExtraTags` are added,
+    // `readRemoveTags` are stripped (only if the paper has them). A tag is never
+    // in both at once.
     readExtraTags: [],
+    readRemoveTags: [],
     // AI assistant: favourite provider/model pairs the user picks in Settings,
     // and the default selection. Keys never live here — only ids.
     aiFavorites: [], // [{ provider, model }]
@@ -537,6 +541,9 @@ export class Store {
     if (read) {
       tags.push(Tags.read + ":" + todayTag());
       tags.push(...this.settings.readExtraTags);
+      // Strip the user's "remove on read" tags (a no-op when absent).
+      const remove = new Set(this.settings.readRemoveTags || []);
+      if (remove.size) tags = tags.filter((t) => !remove.has(t));
     }
     if (skipped) tags.push(Tags.skip);
     return uniq(tags);
@@ -774,6 +781,11 @@ export class Store {
   }
   setReadExtraTags(tags) {
     this.settings.readExtraTags = uniq(tags);
+    this._saveCache();
+    this.notify();
+  }
+  setReadRemoveTags(tags) {
+    this.settings.readRemoveTags = uniq(tags);
     this._saveCache();
     this.notify();
   }

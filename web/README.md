@@ -165,6 +165,9 @@ Every AI change is **confirmed before it happens and can be undone**.
   reading on a strong day makes up for an earlier day you fell short, it shows
   how much you've clawed back and whether you're back on track for the week.
 - **Add by DOI** — fetches metadata from Crossref and adds it to Zotero.
+- **Tags on read** — in **Settings → Tags on read**, choose Zotero tags to
+  **add** and/or tags to **remove** automatically whenever you mark a paper read
+  (removal only applies if the paper already has the tag). Use either or both.
 - **Optional login** — off by default (no credentials); enable a simple
   rate-limited shared password to keep a self-hosted instance private. See
   [Optional login](#optional-login).

@@ -94,6 +94,29 @@ test("skip also remembers the slot for a later reset", () => {
   assert.deepEqual(titles(store), ["A", "B", "C"]);
 });
 
+test("marking read applies both add-on-read and remove-on-read tags", () => {
+  const store = seeded();
+  store.settings.readExtraTags = ["done"];
+  store.settings.readRemoveTags = ["toread"];
+  const b = store.papers.get("B");
+  b.tags = ["toread", "pq:queue", "pq:pos:2048"]; // has the tag to strip
+
+  store.markRead(b);
+  assert.ok(b.tags.includes("done"), "adds the add-on-read tag");
+  assert.ok(!b.tags.includes("toread"), "strips the remove-on-read tag");
+  assert.ok(b.tags.some((t) => t.startsWith("pq:read")), "still marked read");
+  assert.ok(b.tags.includes("pq:pos:2048"), "still remembers its slot");
+});
+
+test("remove-on-read is a no-op when the paper doesn't have the tag", () => {
+  const store = seeded();
+  store.settings.readRemoveTags = ["toread"];
+  const a = store.papers.get("A"); // never had 'toread'
+  store.markRead(a);
+  assert.equal(a.readStatus, "read");
+  assert.ok(!a.tags.includes("toread"));
+});
+
 // Guard: the Postponed list is a normal named queue, so its papers don't leak
 // into Default's positions.
 test("postpone keeps a paper out of the Default queue", () => {
