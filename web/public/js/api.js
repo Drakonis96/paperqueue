@@ -25,8 +25,16 @@ async function request(path, options = {}) {
 export const api = {
   config: () => request("/api/config"),
 
-  library: (since) =>
-    request(`/api/library${since != null ? `?since=${since}` : ""}`),
+  library: (since, force = false) => {
+    const params = new URLSearchParams();
+    if (since != null) params.set("since", since);
+    if (force) params.set("force", "1");
+    const qs = params.toString();
+    return request(`/api/library${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Update check: { current, latest, updateAvailable, url }. */
+  update: () => request("/api/update"),
 
   collections: () => request("/api/collections"),
   topCollections: () => request("/api/collections/top"),

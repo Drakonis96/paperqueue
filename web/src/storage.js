@@ -11,9 +11,37 @@ import path from "node:path";
 import { config } from "./config.js";
 
 const SETTINGS_FILE = "settings.json";
+const SNAPSHOT_FILE = "library.json";
 
 function settingsPath() {
   return path.join(config.dataDir, SETTINGS_FILE);
+}
+
+function snapshotPath() {
+  return path.join(config.dataDir, SNAPSHOT_FILE);
+}
+
+/** Reads the persisted library snapshot ({ items, version }) or null. The
+ *  snapshot lets a freshly-opened browser (or a restarted server) serve the
+ *  library instantly instead of waiting on a full Zotero fetch. */
+export function readSnapshot() {
+  try {
+    const json = JSON.parse(fs.readFileSync(snapshotPath(), "utf8"));
+    if (json && Array.isArray(json.items)) return json;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Atomically writes the library snapshot under DATA_DIR. */
+export function writeSnapshot(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.items)) return;
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  const target = snapshotPath();
+  const tmp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(snapshot));
+  fs.renameSync(tmp, target);
 }
 
 /** Reads the stored settings object, or {} if none has been saved yet. */

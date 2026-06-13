@@ -45,3 +45,26 @@ test("writeSettings coerces non-objects to an empty object", () => {
   storage.writeSettings(null);
   assert.deepEqual(storage.readSettings(), {});
 });
+
+test("readSnapshot returns null before any snapshot is written", () => {
+  assert.equal(storage.readSnapshot(), null);
+});
+
+test("writeSnapshot then readSnapshot round-trips the library snapshot", () => {
+  const snap = {
+    version: 4321,
+    items: [
+      { key: "AAA", data: { key: "AAA", title: "One", tags: [] } },
+      { key: "BBB", data: { key: "BBB", title: "Two", tags: [] } },
+    ],
+  };
+  storage.writeSnapshot(snap);
+  assert.deepEqual(storage.readSnapshot(), snap);
+  assert.ok(fs.existsSync(path.join(tmpDir, "library.json")));
+});
+
+test("writeSnapshot ignores a payload without an items array", () => {
+  storage.writeSnapshot({ version: 1 }); // no items
+  // The previous good snapshot stays on disk.
+  assert.equal(storage.readSnapshot().version, 4321);
+});

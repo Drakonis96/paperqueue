@@ -82,6 +82,51 @@ body {
   border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
+
+/* "A new version is available" banner. */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+.update-banner .update-ico {
+  display: inline-flex;
+  color: var(--accent);
+}
+.update-banner .grow {
+  flex: 1;
+  min-width: 0;
+}
+.update-banner code {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+.update-banner a {
+  font-weight: 650;
+  white-space: nowrap;
+}
+.update-dismiss {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.update-dismiss:hover {
+  background: var(--hover);
+  color: var(--text);
+}
 button {
   font-family: inherit;
   cursor: pointer;
@@ -388,6 +433,24 @@ a {
   border-bottom: 1px solid var(--border);
   transition: background 0.12s;
 }
+
+/* Virtualized Library list: a sized canvas with absolutely-positioned, fixed
+   height rows so only the visible window is in the DOM. */
+.lib-canvas {
+  position: relative;
+}
+.virt-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 100px;
+  overflow: hidden;
+}
+.lib-list .virt-row .row {
+  height: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+}
 .row:last-child {
   border-bottom: none;
 }
@@ -561,6 +624,89 @@ a {
   margin-bottom: 16px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+/* Queue tabs: a horizontally-scrollable strip with arrows; each tab is a drop
+   target so a paper can be dragged from one queue to another. */
+.qtabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.qtabs {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  padding: 2px;
+  flex: 1;
+}
+.qtabs::-webkit-scrollbar {
+  display: none;
+}
+.qtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.qtab:hover {
+  border-color: var(--accent);
+}
+.qtab.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.qtab-count {
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.qtab.active .qtab-count {
+  background: var(--accent);
+  color: #fff;
+}
+.qtab.qtab-drop {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.qtabs-arrow,
+.qtabs-add {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.qtabs-arrow:hover,
+.qtabs-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .search {
   flex: 1;

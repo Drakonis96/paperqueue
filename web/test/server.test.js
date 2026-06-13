@@ -51,6 +51,7 @@ before(async () => {
       DEMO_MODE: "1",
       PORT: String(port),
       DATA_DIR: tmpDir,
+      UPDATE_CHECK: "0",
       GEMINI_API_KEY: "test-gemini-key",
       OPENAI_API_KEY: "",
       OPENROUTER_API_KEY: "",
@@ -114,4 +115,24 @@ test("settings PUT rejects a non-object body", async () => {
     body: JSON.stringify(["nope"]),
   });
   assert.equal(res.status, 400);
+});
+
+test("library serves the demo data, and force-sync still works", async () => {
+  const full = await (await fetch(`${base}/api/library`)).json();
+  assert.ok(Array.isArray(full.items) && full.items.length > 0);
+  assert.equal(typeof full.version, "number");
+
+  // The manual Sync button hits force=1 — it must keep working.
+  const forced = await (await fetch(`${base}/api/library?force=1`)).json();
+  assert.ok(Array.isArray(forced.items) && forced.items.length > 0);
+
+  // Polling at the current version is a no-op.
+  const nm = await (await fetch(`${base}/api/library?since=${full.version}`)).json();
+  assert.equal(nm.notModified, true);
+});
+
+test("update endpoint returns a well-formed payload", async () => {
+  const u = await (await fetch(`${base}/api/update`)).json();
+  assert.equal(typeof u.current, "string");
+  assert.equal(typeof u.updateAvailable, "boolean");
 });

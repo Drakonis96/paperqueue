@@ -16,7 +16,8 @@ import { ZoteroStream } from "./stream.js";
 import { DemoZoteroClient } from "./demo.js";
 import { zoteroItemForDOI } from "./crossref.js";
 import { aiConfig, aiEnabled, listModels, streamChat } from "./ai.js";
-import { readSettings, writeSettings } from "./storage.js";
+import { readSettings, writeSettings, readSnapshot, writeSnapshot } from "./storage.js";
+import { checkForUpdate } from "./update.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
@@ -31,7 +32,87 @@ const state = {
   userId: null,
   library: null,
   stream: null,
+  // Server-side library snapshot ({ items, version }). Lets a freshly-opened
+  // browser load the whole library instantly instead of each one triggering its
+  // own full Zotero fetch. Kept warm by the live stream; persisted to DATA_DIR.
+  snapshot: null,
 };
+
+// MARK: - Server-side library snapshot ---------------------------------------
+
+let refreshChain = Promise.resolve();
+let snapshotDirty = false;
+let snapshotWriteTimer = null;
+
+/** Throttled, atomic persistence of the snapshot (it can be several MB). */
+function persistSnapshot() {
+  snapshotDirty = true;
+  if (snapshotWriteTimer) return;
+  snapshotWriteTimer = setTimeout(() => {
+    snapshotWriteTimer = null;
+    if (!snapshotDirty || !state.snapshot) return;
+    snapshotDirty = false;
+    try {
+      writeSnapshot(state.snapshot);
+    } catch {
+      /* non-fatal — the in-memory snapshot still serves */
+    }
+  }, 30_000);
+}
+
+/**
+ * Refreshes the cached snapshot from Zotero. A full pass replaces it; an
+ * incremental pass upserts changed items and drops deleted ones. Serialised
+ * through `refreshChain` so concurrent triggers don't overlap. Demo mode is
+ * always served live, so it never caches here.
+ */
+function refreshSnapshot({ full = false } = {}) {
+  if (!state.client || state.demo) return refreshChain;
+  refreshChain = refreshChain
+    .then(async () => {
+      const since = full || !state.snapshot ? null : state.snapshot.version;
+      const result = await state.client.librarySync(since);
+      if (result.notModified) return;
+      if (since == null) {
+        state.snapshot = { items: result.items, version: result.version };
+      } else {
+        const deleted = await state.client.deletedItemKeys(since).catch(() => []);
+        const byKey = new Map(state.snapshot.items.map((i) => [i.data.key, i]));
+        for (const it of result.items) byKey.set(it.data.key, it);
+        for (const k of deleted) byKey.delete(k);
+        state.snapshot = {
+          items: [...byKey.values()],
+          version: result.version ?? state.snapshot.version,
+        };
+      }
+      persistSnapshot();
+    })
+    .catch(() => {
+      /* leave the previous snapshot in place on error */
+    });
+  return refreshChain;
+}
+
+/** Folds a live `/api/library` read back into the cache so manual syncs and
+ *  incremental polls keep the snapshot current without a second fetch. */
+function applyToSnapshot(result, since, deleted) {
+  if (state.demo || result.notModified) return;
+  if (since == null) {
+    state.snapshot = { items: result.items, version: result.version };
+  } else if (state.snapshot) {
+    const byKey = new Map(state.snapshot.items.map((i) => [i.data.key, i]));
+    for (const it of result.items) byKey.set(it.data.key, it);
+    for (const k of deleted || []) byKey.delete(k);
+    state.snapshot = {
+      items: [...byKey.values()],
+      version: result.version ?? state.snapshot.version,
+    };
+  } else {
+    refreshSnapshot({ full: true }); // no base yet — build one in the background
+    return;
+  }
+  persistSnapshot();
+}
 
 async function initBackend() {
   if (isDemo) {
@@ -86,13 +167,21 @@ async function initBackend() {
   state.library = library;
   state.canWrite = info.canWrite;
 
+  // Warm the snapshot: serve the persisted one instantly (if any), then refresh
+  // from Zotero in the background so the first browser load is fast and current.
+  state.snapshot = readSnapshot();
+  refreshSnapshot({ full: !state.snapshot });
+
   // Live updates: one server-side WebSocket to Zotero, fanned out to browsers.
+  // On every change we refresh the cached snapshot, then notify browsers.
   state.stream = new ZoteroStream({
     apiKey: config.zoteroApiKey,
     userId: info.userID,
     url: config.zoteroStreamURL,
   });
-  state.stream.on("changed", (version) => broadcastChanged(version));
+  state.stream.on("changed", (version) => {
+    refreshSnapshot().finally(() => broadcastChanged(version));
+  });
   state.stream.start();
 
   console.log(
@@ -157,14 +246,43 @@ app.get("/api/library", async (req, res) => {
   if (!requireClient(res)) return;
   try {
     const since = req.query.since != null ? Number(req.query.since) : null;
+    // The manual Sync button sends force=1 to always pull fresh from Zotero
+    // (and refresh the cache). Everything else is served from the snapshot when
+    // possible, so freshly-opened browsers don't each trigger a full fetch.
+    const force = req.query.force === "1" || req.query.force === "true";
+
+    if (!state.demo && !force && state.snapshot) {
+      if (since != null && Number(since) === state.snapshot.version) {
+        return res.json({ items: [], version: state.snapshot.version, notModified: true, deleted: [] });
+      }
+      if (since == null) {
+        return res.json({
+          items: state.snapshot.items,
+          version: state.snapshot.version,
+          notModified: false,
+          deleted: [],
+        });
+      }
+    }
+
     const result = await state.client.librarySync(since);
     let deleted = [];
     if (since != null && !result.notModified && !state.demo) {
       deleted = await state.client.deletedItemKeys(since).catch(() => []);
     }
+    // Keep the cache in step with any live read (force or incremental).
+    applyToSnapshot(result, since, deleted);
     res.json({ ...result, deleted });
   } catch (err) {
     handleError(res, err);
+  }
+});
+
+app.get("/api/update", async (_req, res) => {
+  try {
+    res.json(await checkForUpdate());
+  } catch {
+    res.json({ current: config.version, latest: config.version, updateAvailable: false, url: null });
   }
 });
 

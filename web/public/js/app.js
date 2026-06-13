@@ -124,6 +124,7 @@ const ui = {
   historySelected: new Set(), // keys of selected papers for bulk tag ops
   // Stats calendar: first day of the displayed month (defaults to this month).
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  update: null, // { current, latest, url } when a newer release is available
 };
 
 const TABS = [
@@ -162,6 +163,32 @@ async function init() {
   });
   window.addEventListener("pagehide", () => store.flushSettings());
   scheduleReminderCheck();
+  checkUpdate();
+}
+
+// Surface a dismissible banner when a newer GitHub release exists. Dismissal is
+// remembered per version so it doesn't nag after you've seen it.
+async function checkUpdate() {
+  try {
+    const u = await api.update();
+    if (u?.updateAvailable && localStorage.getItem("pq.update.dismissed") !== u.latest) {
+      ui.update = u;
+      scheduleRender();
+    }
+  } catch {
+    /* non-fatal */
+  }
+}
+
+function updateBanner() {
+  if (!ui.update) return "";
+  const u = ui.update;
+  return `<div class="update-banner">
+    <span class="update-ico">${I("refresh", 15)}</span>
+    <span class="grow">A new version <b>v${esc(u.latest)}</b> is available — you're on v${esc(u.current)}. Run <code>docker compose pull &amp;&amp; docker compose up -d</code>.</span>
+    ${u.url ? `<a href="${attr(u.url)}" target="_blank" rel="noopener">Release notes</a>` : ""}
+    <button class="update-dismiss" data-act="dismissUpdate" title="Dismiss">${I("x", 14)}</button>
+  </div>`;
 }
 
 async function loadAiProviders() {
@@ -265,6 +292,7 @@ function shell() {
       </div>
     </aside>
     <main class="main">
+      ${updateBanner()}
       <header class="topbar">
         <div>
           <h1>${topTitle()}</h1>
@@ -379,11 +407,25 @@ function queueView() {
   const suggestAIBtn = store.config.ai
     ? `<button class="btn ai-order-btn" data-act="suggestAI" title="Get suggestions from a collection">${I("sparkle", 16)} Suggest with AI</button>`
     : "";
-  const queueSelector = `
+  const tabs = store.availableQueues
+    .map((q) => {
+      const count = store.pendingInQueue(q).length;
+      const active = q === store.activeQueue;
+      const icon = q === POSTPONED_QUEUE ? "clock" : "layers";
+      return `<button class="qtab ${active ? "active" : ""}" data-act="setQueue:${attr(q)}" data-drop-queue="${attr(q)}" title="${attr(q)}">${I(icon, 14)}<span class="qtab-name">${esc(q)}</span>${count ? `<span class="qtab-count">${count}</span>` : ""}</button>`;
+    })
+    .join("");
+  const tabsBar = `
+    <div class="qtabs-bar">
+      <button class="qtabs-arrow" data-act="qtabsScroll:-1" aria-label="Scroll queues left">${I("chevronLeft", 18)}</button>
+      <div class="qtabs" id="qtabs">${tabs}</div>
+      <button class="qtabs-arrow" data-act="qtabsScroll:1" aria-label="Scroll queues right">${I("chevronRight", 18)}</button>
+      <button class="qtabs-add" data-act="queueMenu" title="New / manage queues">${I("plus", 18)}</button>
+    </div>`;
+  const queueSelector =
+    tabsBar +
+    `
     <div class="toolbar">
-      <button class="select" data-act="queueMenu" style="display:inline-flex;align-items:center;gap:8px">
-        ${I("layers", 16)} ${esc(store.activeQueue)} ${I("chevron", 14)}
-      </button>
       <div class="search" style="max-width:300px">
         ${I("search", 17)}
         <input id="queue-search" type="text" placeholder="Search queue" value="${attr(ui.queueSearch)}" />
@@ -438,7 +480,7 @@ function queueView() {
   return (
     queueSelector +
     `<div class="list" id="queue-list">
-      <div class="list-head">${papers.length} ${isPostponed ? "postponed" : "to read"} · drag the handle, or tap a number, to reorder</div>
+      <div class="list-head">${papers.length} ${isPostponed ? "postponed" : "to read"} · drag the handle to reorder, or drop onto a queue tab to move it</div>
       ${rows}
     </div>`
   );
@@ -569,18 +611,55 @@ function libraryView() {
     chips = `<div class="chips">${parts.join("")}</div>`;
   }
 
-  const rows = filtered
-    .map((p) => paperRow(p, { showStatus: true, actions: libraryAction(p) + `<button class="act" data-act="manageLibTags:${p.key}" title="Edit tags">${I("tag", 17)}</button>` }))
-    .join("");
+  // Virtualized: render only a window of rows so libraries with thousands of
+  // items stay smooth. libraryView emits a sized, empty canvas; renderLibWindow
+  // (called on first paint and on scroll) fills the visible slice.
+  libRows = filtered;
+  lastLibScrollKey = "";
+  const body = filtered.length
+    ? `<div id="lib-canvas" class="lib-canvas" style="height:${filtered.length * LIB_ROW_H}px"></div>`
+    : `<div class="empty"><p>No items match your filters.</p></div>`;
 
   return (
     toolbar +
     chips +
-    `<div class="list">
+    `<div class="list lib-list">
       <div class="list-head"><span>${filtered.length} item${filtered.length === 1 ? "" : "s"}</span><span class="spacer"></span><span>${I("sort", 14)} ${SORTS[ui.sort]}</span></div>
-      ${rows || `<div class="empty"><p>No items match your filters.</p></div>`}
+      ${body}
     </div>`
   );
+}
+
+// Library list virtualization. Rows are a fixed height so the visible window can
+// be computed from the scroll position; content is clipped to that height.
+const LIB_ROW_H = 100;
+const LIB_BUFFER = 6;
+let libRows = [];
+let lastLibScrollKey = "";
+
+function renderLibWindow() {
+  const canvas = $("#lib-canvas");
+  if (!canvas || ui.tab !== "library") return;
+  const total = libRows.length;
+  const rect = canvas.getBoundingClientRect();
+  const above = Math.max(0, -rect.top); // canvas pixels scrolled past the top
+  const start = Math.max(0, Math.floor(above / LIB_ROW_H) - LIB_BUFFER);
+  const visible = Math.ceil(window.innerHeight / LIB_ROW_H) + LIB_BUFFER * 2;
+  const end = Math.min(total, start + visible);
+  const key = `${start}:${end}:${total}`;
+  if (key === lastLibScrollKey && canvas.childElementCount) return; // same window
+  lastLibScrollKey = key;
+  let html = "";
+  for (let i = start; i < end; i++) {
+    const p = libRows[i];
+    html += `<div class="virt-row" style="top:${i * LIB_ROW_H}px">${paperRow(p, {
+      showStatus: true,
+      actions:
+        libraryAction(p) +
+        `<button class="act" data-act="manageLibTags:${p.key}" title="Edit tags">${I("tag", 17)}</button>`,
+    })}</div>`;
+  }
+  canvas.innerHTML = html;
 }
 
 function libraryAction(p) {
@@ -1495,7 +1574,7 @@ document.addEventListener("keydown", (e) => {
       }
       break;
     }
-    case "r": store.syncLibrary(); break;
+    case "r": store.syncLibrary({ force: true }); break;
     case "?": shortcutsModal(); break;
     default: return;
   }
@@ -1561,10 +1640,22 @@ function handleAction(act, target) {
       window.scrollTo({ top: 0 });
       return;
     case "sync":
-      store.syncLibrary();
+      // The manual Sync button always pulls fresh from Zotero (bypasses the
+      // server snapshot cache) and refreshes the cache for everyone.
+      store.syncLibrary({ force: true });
       return;
+    case "qtabsScroll": {
+      const el = $("#qtabs");
+      if (el) el.scrollBy({ left: Number(key) * 220, behavior: "smooth" });
+      return;
+    }
     case "shortcuts":
       return shortcutsModal();
+    case "dismissUpdate":
+      if (ui.update) localStorage.setItem("pq.update.dismissed", ui.update.latest);
+      ui.update = null;
+      render();
+      return;
     case "closeModal":
       return closeModal();
 
@@ -1978,10 +2069,45 @@ function updateScrollFab() {
 let dragKey = null;
 function bindDynamic() {
   if (!scrollListenerAttached) {
-    window.addEventListener("scroll", updateScrollFab, { passive: true });
+    const onScroll = () => {
+      updateScrollFab();
+      renderLibWindow();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener(
+      "resize",
+      () => {
+        lastLibScrollKey = "";
+        renderLibWindow();
+      },
+      { passive: true }
+    );
     scrollListenerAttached = true;
   }
   updateScrollFab();
+  renderLibWindow();
+
+  // Queue tabs are drop targets: dragging a paper onto another tab moves it to
+  // that queue. Wired whenever the tab strip is present.
+  document.querySelectorAll(".qtab[data-drop-queue]").forEach((tab) => {
+    tab.addEventListener("dragover", (e) => {
+      if (!dragKey) return;
+      e.preventDefault();
+      tab.classList.add("qtab-drop");
+    });
+    tab.addEventListener("dragleave", () => tab.classList.remove("qtab-drop"));
+    tab.addEventListener("drop", (e) => {
+      tab.classList.remove("qtab-drop");
+      if (!dragKey) return;
+      e.preventDefault();
+      const paper = store.papers.get(dragKey);
+      const target = tab.dataset.dropQueue;
+      if (paper && target && paper.queueName !== store.storedName(target)) {
+        store.moveToQueue(paper, target);
+        toast(`Moved to “${target}”`, "success");
+      }
+    });
+  });
 
   const list = $("#queue-list");
   if (!list) return;
@@ -1996,6 +2122,7 @@ function bindDynamic() {
       dragKey = null;
       row.classList.remove("dragging");
       list.querySelectorAll(".drop-target").forEach((r) => r.classList.remove("drop-target"));
+      document.querySelectorAll(".qtab-drop").forEach((t) => t.classList.remove("qtab-drop"));
     });
     row.addEventListener("dragover", (e) => {
       e.preventDefault();

@@ -471,7 +471,7 @@ export class Store {
     return this.config;
   }
 
-  async syncLibrary({ silent = false } = {}) {
+  async syncLibrary({ silent = false, force = false } = {}) {
     if (!this.config.connected) return;
     if (!silent) {
       this.isSyncing = true;
@@ -481,7 +481,7 @@ export class Store {
     }
     try {
       const since = this.baselineVersion;
-      const result = await api.library(since);
+      const result = await api.library(since, force);
       if (result.notModified) {
         // Nothing changed remotely — nothing to do.
       } else if (since != null) {
