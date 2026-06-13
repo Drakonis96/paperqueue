@@ -100,10 +100,16 @@ function currentModelFrom(root, id = "ai-model-select") {
 // Generic non-streaming AI call
 // ---------------------------------------------------------------------------
 
-async function askAi(messages, { sel = currentModel(), temperature = 0.2 } = {}) {
+async function askAi(messages, { sel = currentModel(), temperature = 0.2, timeoutMs = 300000 } = {}) {
   if (!sel) throw new Error("Pick a model in Settings → AI assistant.");
   const abort = new AbortController();
-  const timeout = setTimeout(() => abort.abort(), 120000); // 2 min max
+  // Cap the wait so a stuck request can't hang forever, but keep it generous —
+  // reasoning models with a big context legitimately take a couple of minutes.
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    abort.abort();
+  }, timeoutMs);
   let text = "";
   try {
     await api.aiChat(
@@ -123,6 +129,19 @@ async function askAi(messages, { sel = currentModel(), temperature = 0.2 } = {})
         }
       }
     );
+  } catch (err) {
+    // A timeout (or any abort) surfaces from fetch as a raw "BodyStreamBuffer was
+    // aborted" — translate it into something actionable.
+    const aborted =
+      err?.name === "AbortError" || /abort/i.test(err?.message || "");
+    if (timedOut) {
+      throw new Error(
+        `The model took too long (over ${Math.round(timeoutMs / 1000)}s) and the request was cancelled. ` +
+          `Try a faster model (e.g. gemini-2.5-flash) or pick fewer collections/items.`
+      );
+    }
+    if (aborted) throw new Error("The AI request was cancelled.");
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
@@ -301,12 +320,30 @@ function openPreviewModal(title, bodyHtml, onApply, onDismiss) {
   return back;
 }
 
-function busyModal(title, message) {
+function busyModal(title, message, { showElapsed = false } = {}) {
   const back = document.createElement("div");
   back.className = "ai-mini-backdrop";
-  back.innerHTML = `<div class="ai-mini"><div class="ai-mini-body" style="text-align:center;padding:28px"><div class="ai-busy-icon">${I("spark", 32)}</div><div style="font-weight:700">${esc(title)}</div><div style="color:var(--text-2);font-size:13px;margin-top:6px">${esc(message)}</div></div></div>`;
+  const elapsed = showElapsed
+    ? `<div class="ai-busy-elapsed" style="color:var(--text-3);font-size:12px;margin-top:10px">0s</div>`
+    : "";
+  back.innerHTML = `<div class="ai-mini"><div class="ai-mini-body" style="text-align:center;padding:28px"><div class="ai-busy-icon">${I("spark", 32)}</div><div style="font-weight:700">${esc(title)}</div><div style="color:var(--text-2);font-size:13px;margin-top:6px">${esc(message)}</div>${elapsed}</div></div>`;
   document.body.appendChild(back);
-  return () => back.remove();
+  // A live elapsed counter reassures the user the request is still working
+  // during a long generation (and hints that reasoning models are just slow).
+  let timer = null;
+  if (showElapsed) {
+    const start = Date.now();
+    const el = back.querySelector(".ai-busy-elapsed");
+    timer = setInterval(() => {
+      if (!el) return;
+      const s = Math.round((Date.now() - start) / 1000);
+      el.textContent = s < 20 ? `${s}s` : `${s}s · reasoning models can take a minute or two`;
+    }, 1000);
+  }
+  return () => {
+    if (timer) clearInterval(timer);
+    back.remove();
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +409,7 @@ export async function orderQueue() {
     })),
   });
 
-  const done = busyModal("Ordering queue", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`);
+  const done = busyModal("Ordering queue", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`, { showElapsed: true });
   let raw = "";
   try {
     raw = await askAi(messages, { sel });
@@ -550,7 +587,7 @@ async function runSuggestions(sel, pickedCollections, count, excludedTags = []) 
 
   // Swap the spinner message now that we're actually asking the model.
   close();
-  close = busyModal("Suggesting papers", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`);
+  close = busyModal("Suggesting papers", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`, { showElapsed: true });
   let raw = "";
   try {
     raw = await askAi(messages, { sel });
