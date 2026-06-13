@@ -8,6 +8,10 @@
 
 const PAGE_LIMIT = 100; // largest page Zotero serves at once
 const MAX_CONCURRENT_PAGES = 5; // keep a few page reads in flight
+const MAX_RETRIES = 4; // attempts on 429/503 before giving up
+const MAX_BACKOFF_MS = 60_000; // cap any single wait so a sick server can't hang a sync
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class ZoteroError extends Error {
   constructor(status, message) {
@@ -29,6 +33,9 @@ export class ZoteroClient {
     this.library = library;
     this.apiBase = (apiBase || "https://api.zotero.org").replace(/\/+$/, "");
     this.demo = false;
+    // Not before this epoch-ms should we send the next request — set from
+    // Zotero's load-shedding headers (see _request).
+    this._backoffUntil = 0;
   }
 
   // MARK: - Identity
@@ -66,6 +73,49 @@ export class ZoteroClient {
       "Zotero-API-Key": this.apiKey,
       ...extra,
     };
+  }
+
+  /**
+   * fetch() wrapper that honours Zotero's documented rate-limiting signals so a
+   * busy server (or a large parallel snapshot fetch) degrades gracefully instead
+   * of erroring:
+   *   - `Backoff: <s>`   — "slow down" advisory on any response; we gate the
+   *                        next request by that long.
+   *   - `429`/`503` + `Retry-After: <s>` — we wait, then retry (up to
+   *                        MAX_RETRIES), falling back to exponential backoff when
+   *                        no Retry-After is given.
+   * Every wait is capped at MAX_BACKOFF_MS. The backoff clock is shared across
+   * this client's concurrent page reads, so one 429 throttles them all.
+   */
+  async _request(url, init = {}) {
+    for (let attempt = 0; ; attempt++) {
+      const wait = this._backoffUntil - Date.now();
+      if (wait > 0) await sleep(Math.min(wait, MAX_BACKOFF_MS));
+
+      const res = await fetch(url, init);
+
+      const backoff = Number(res.headers.get("Backoff"));
+      if (backoff > 0) {
+        this._backoffUntil = Math.max(this._backoffUntil, Date.now() + backoff * 1000);
+      }
+
+      if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
+        // Prefer an explicit Retry-After (including a valid 0 = "retry now"),
+        // then the Backoff advisory, else exponential fallback.
+        const ra = res.headers.get("Retry-After");
+        const retryAfter =
+          ra != null && Number.isFinite(Number(ra)) && Number(ra) >= 0
+            ? Number(ra)
+            : backoff > 0
+              ? backoff
+              : 2 ** attempt;
+        const waitMs = Math.min(retryAfter * 1000, MAX_BACKOFF_MS);
+        this._backoffUntil = Math.max(this._backoffUntil, Date.now() + waitMs);
+        if (waitMs > 0) await sleep(waitMs);
+        continue;
+      }
+      return res;
+    }
   }
 
   // MARK: - Reads
@@ -110,7 +160,7 @@ export class ZoteroClient {
 
   /** Keys of items deleted since `version` (so incremental sync can drop them). */
   async deletedItemKeys(version) {
-    const res = await fetch(this._url(`deleted?since=${version}`), {
+    const res = await this._request(this._url(`deleted?since=${version}`), {
       headers: this._headers(),
     });
     if (!res.ok) return [];
@@ -142,7 +192,7 @@ export class ZoteroClient {
 
   /** Creates items from an array of Zotero item-data dictionaries. */
   async createItems(items) {
-    const res = await fetch(this._url("items"), {
+    const res = await this._request(this._url("items"), {
       method: "POST",
       headers: this._headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(items),
@@ -167,7 +217,7 @@ export class ZoteroClient {
    */
   async setTags(itemKey, tags) {
     for (let attempt = 0; attempt <= 1; attempt++) {
-      const getRes = await fetch(this._url(`items/${itemKey}`), {
+      const getRes = await this._request(this._url(`items/${itemKey}`), {
         headers: this._headers(),
       });
       if (getRes.status !== 200) {
@@ -176,7 +226,7 @@ export class ZoteroClient {
       const item = await getRes.json();
       const version = item.data.version;
 
-      const patchRes = await fetch(this._url(`items/${itemKey}`), {
+      const patchRes = await this._request(this._url(`items/${itemKey}`), {
         method: "PATCH",
         headers: this._headers({
           "Content-Type": "application/json",
@@ -206,7 +256,7 @@ export class ZoteroClient {
       headers["If-Modified-Since-Version"] = String(since);
     }
 
-    const res = await fetch(`${this._url(path)}?${params}`, {
+    const res = await this._request(`${this._url(path)}?${params}`, {
       headers,
       cache: "no-store",
     });
@@ -251,7 +301,7 @@ export class ZoteroClient {
     let start = 0;
     for (;;) {
       const params = new URLSearchParams({ limit: String(PAGE_LIMIT), start: String(start) });
-      const res = await fetch(`${this._url(path)}?${params}`, { headers: this._headers() });
+      const res = await this._request(`${this._url(path)}?${params}`, { headers: this._headers() });
       if (res.status !== 200) {
         throw new ZoteroError(res.status, "Couldn't read collections.");
       }

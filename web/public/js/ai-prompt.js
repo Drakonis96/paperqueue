@@ -171,3 +171,47 @@ export function buildSuggestMessages({ count, candidates, queueContext = [], exc
     { role: "user", content: "Recommend papers to add to my reading queue." },
   ];
 }
+
+/**
+ * Builds the chat messages for the "study a topic" mode: the user names a topic
+ * they want to learn / go deeper on, and the model picks the candidate papers
+ * (from the chosen collections) most useful for studying it, judging by titles,
+ * authors, year and tags. Reuses SUGGEST_SCHEMA for the structured output.
+ * @param {{topic:string, count:number, candidates:{key:string,title:string,authors:string,year:string,tags:string[]}[], excludedTags?:string[], includedTags?:string[]}} opts
+ */
+export function buildTopicMessages({ topic, count, candidates, excludedTags = [], includedTags = [] }) {
+  const cleanTopic = String(topic || "").trim();
+  const candidateText = candidates
+    .map(
+      (it) =>
+        `- [${it.key}] ${it.title}` +
+        `${it.authors ? ` — ${it.authors}` : ""}${it.year ? ` (${it.year})` : ""}` +
+        tagSuffix(it.tags)
+    )
+    .join("\n");
+
+  const includeLine = includedTags.length
+    ? `\n\nThe user only wants papers related to these tags — every suggestion should relate to at least one of them: ${includedTags.join(", ")}.`
+    : "";
+  const excludeLine = excludedTags.length
+    ? `\n\nThe user does NOT want papers about these tags — never suggest an item carrying any of them: ${excludedTags.join(", ")}.`
+    : "";
+
+  return [
+    {
+      role: "system",
+      content:
+        `You are PaperQueue's reading assistant. The user wants to study and deepen their understanding of a specific topic. ` +
+        `From the Candidate items below — judging by their titles, authors, year and tags — select up to ${count} papers that best help someone learn and go deeper on that topic, ` +
+        `ordering them from foundational/introductory to advanced where you can tell.\n\n` +
+        `Topic to study:\n${cleanTopic}\n\n` +
+        `${PQ_TAG_LEGEND}${includeLine}${excludeLine}\n\n` +
+        `Candidate items (each line is: - [key] title — authors (year) · tags):\n${candidateText}\n\n` +
+        `Every "key" must come from the Candidate items. Only include papers genuinely relevant to the topic — it's better to return fewer than ${count} than to pad with off-topic items. ` +
+        `In each "reason", say briefly how that paper helps study the topic.\n` +
+        `Return ONLY a JSON object with a "suggestions" array of objects, each with "key", "title" and "reason", like:\n` +
+        `{"suggestions": [{"key": "KEY1", "title": "Title 1", "reason": "Short reason"}]}`,
+    },
+    { role: "user", content: `Suggest papers from my collections to study: ${cleanTopic}` },
+  ];
+}

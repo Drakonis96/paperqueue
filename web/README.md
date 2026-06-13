@@ -74,6 +74,8 @@ iPhone/iPad app and the Mac app all stay in lock-step.
 | `DEMO_MODE`       | `0`                       | Force the demo library even with a key set.             |
 | `DATA_DIR`        | `/data` (Docker)          | Where user settings are persisted. Mount a volume here. |
 | `AUTH_ENABLED`    | `0` *(off)*               | Require a login (see [Optional login](#optional-login)).|
+| `PQ_SECURITY_HEADERS` | `1` *(on)*            | Hardening headers (CSP, nosniff, anti-clickjacking). `0` to disable. |
+| `PQ_FRAME_ANCESTORS`  | `'none'`             | Who may embed the app in an `<iframe>` (see [Security headers](#security-headers)). |
 
 ### Settings persistence (`/data`)
 
@@ -117,6 +119,32 @@ per IP** to blunt brute-force guessing.
 > meant for keeping a self-hosted instance private — not a multi-user system. It
 > doesn't replace putting the app behind your own reverse proxy / TLS.
 
+### Security headers
+
+Every response carries hardening headers by default: a strict same-origin
+**Content-Security-Policy** (backs up the UI's HTML escaping), `X-Content-Type-Options:
+nosniff`, `Referrer-Policy`, a locked-down `Permissions-Policy`, and
+anti-clickjacking framing controls. Everything the browser needs is same-origin
+(the AI keys stay on the server, so the browser never calls a provider directly),
+so the default policy needs no exceptions.
+
+- `PQ_SECURITY_HEADERS=0` turns them off — only if a reverse proxy in front
+  already sets equivalent headers.
+- `PQ_FRAME_ANCESTORS` controls who may embed PaperQueue in an `<iframe>`. The
+  default `'none'` blocks all framing. To pin it inside a self-hosted dashboard
+  (Heimdall, Organizr, Homepage…), set it to `'self'` or a space-separated list
+  of origins, e.g. `PQ_FRAME_ANCESTORS='https://dash.example.com'`.
+
+### Install it as an app (PWA)
+
+The web edition is an installable **Progressive Web App**. Open it in a browser
+and use **Install** (desktop Chrome/Edge address bar) or **Add to Home Screen**
+(iOS Safari / Android Chrome) to get a standalone, fullscreen icon — ideal for
+reading on a phone or tablet. The app shell is cached so it launches instantly
+and opens offline; your queue and library always load fresh from Zotero (the
+service worker never caches API data). Installability needs a **secure origin**
+(HTTPS, or `localhost` for testing).
+
 ### AI assistant (optional)
 
 Set a key for any provider to switch on the in-app **AI assistant** (the floating
@@ -134,12 +162,17 @@ to the browser and never logged.
 | `AI_CUSTOM_API_KEY`  | Key for it (use any non-empty value for keyless local servers).  |
 
 In **Settings → AI assistant** each configured provider can *Load models*; star the
-ones you want and they appear in the chat's model picker. The assistant can:
+ones you want and they appear in the model picker. From the **Queue** tab the
+assistant can:
 
-- **Suggest papers** from one or more *context* collections — you say how many, it
-  proposes (with a reason each), you tick which to add.
+- **Study a topic** — type what you want to learn, pick one or more reference
+  collections, and it suggests readings to go deeper on that topic (judging by the
+  titles), ordered roughly foundational → advanced. Optional include/exclude tag
+  filters narrow the candidates.
+- **Suggest papers** from one or more collections to complement what's already
+  queued — you say how many, it proposes (with a reason each), you tick which to add.
 - **Reorder the queue** by topical/author/chronological affinity — from the
-  **Order with AI** button on the Queue tab.
+  **Order with AI** button.
 
 Every AI change is **confirmed before it happens and can be undone**.
 

@@ -13,6 +13,7 @@ import { authorLine, DEFAULT_QUEUE } from "./store.js";
 import {
   buildReorderMessages,
   buildSuggestMessages,
+  buildTopicMessages,
   filterExcluded,
   filterIncluded,
   ORDER_SCHEMA,
@@ -51,7 +52,7 @@ export function initAi(opts) {
   store = opts.store;
   api = opts.api;
   if (opts.toast) toast = opts.toast;
-  return { orderQueue, addSuggestions };
+  return { orderQueue, addSuggestions, studyTopic };
 }
 
 function aiReady() {
@@ -551,8 +552,101 @@ export async function addSuggestions() {
   });
 }
 
-async function runSuggestions(sel, pickedCollections, count, excludedTags = [], includedTags = []) {
-  let close = busyModal("Suggesting papers", "Reading the selected collections…");
+// ---------------------------------------------------------------------------
+// Entry 3: study a topic — suggest readings from collections to learn a topic
+// ---------------------------------------------------------------------------
+
+export async function studyTopic() {
+  if (!aiReady()) return;
+  if (!currentModel()) {
+    toast("Pick a model in Settings → AI assistant", "error");
+    return;
+  }
+
+  const loading = busyModal("Study a topic", "Loading your collections…");
+  let roots;
+  try {
+    ({ roots } = await loadCollections());
+  } catch {
+    loading();
+    toast("Couldn't load collections", "error");
+    return;
+  }
+  loading();
+
+  const selected = new Set();
+  const tree = roots.length
+    ? renderCollectionTree(roots, 0, selected)
+    : `<div class="ai-muted">No collections in this library.</div>`;
+
+  const tags = store.libraryTags();
+  const chipCloud = (kind, attrName) =>
+    tags.length
+      ? `<div class="ai-xtags">${tags
+          .map((t) => `<button type="button" class="ai-xtag ${kind}" ${attrName}="${esc(t)}">${esc(t)}</button>`)
+          .join("")}</div>`
+      : `<div class="ai-muted">No tags in your library yet.</div>`;
+
+  const includeSection = `<div class="ai-include">
+         <label class="ai-field-label">Only papers tagged (optional)</label>
+         <div class="ai-muted" style="margin:2px 0 8px">Tap tags to consider only papers carrying at least one of them.</div>
+         ${chipCloud("inc", "data-itag")}
+       </div>`;
+  const excludeSection = `<div class="ai-exclude">
+         <label class="ai-field-label">Exclude papers tagged (optional)</label>
+         <div class="ai-muted" style="margin:2px 0 8px">Tap tags to drop any suggestion that carries them.</div>
+         ${chipCloud("exc", "data-xtag")}
+       </div>`;
+
+  const modal = openPickerModal(
+    "Study a topic",
+    `<div class="ai-muted" style="margin-bottom:10px">Tell the assistant what you want to study, then pick the collections to draw from. It suggests readings to go deeper, based on the titles.</div>
+     <div style="margin:0 0 12px">
+       <label class="ai-field-label">Topic to study</label>
+       <input type="text" class="ai-topic-input" placeholder="e.g. diffusion models for image generation" data-ai-topic style="width:100%;box-sizing:border-box" autofocus>
+     </div>
+     <div style="margin:0 0 12px">
+       <label class="ai-field-label">Number of suggestions</label>
+       <input type="number" class="ai-count-input" min="1" max="50" value="5" data-ai-count style="width:80px">
+     </div>
+     <label class="ai-field-label">Collections</label>
+     <div class="ai-pick-list" style="max-height:210px;overflow-y:auto">${tree}</div>
+     ${includeSection}
+     ${excludeSection}`,
+    async (root) => {
+      const topic = (root.querySelector("[data-ai-topic]")?.value || "").trim();
+      if (!topic) {
+        toast("Type a topic to study", "error");
+        return false;
+      }
+      const picked = [...root.querySelectorAll('.ai-pick-list input[type="checkbox"]:checked')].map((cb) => ({
+        key: cb.value,
+        name: cb.dataset.name,
+      }));
+      if (!picked.length) {
+        toast("Pick at least one collection", "error");
+        return false;
+      }
+      const sel = currentModelFrom(root);
+      const countInput = root.querySelector("[data-ai-count]");
+      const count = Math.max(1, Math.min(50, parseInt(countInput?.value || "5", 10)));
+      const includedTags = [...root.querySelectorAll(".ai-include .ai-xtag.sel")].map((b) => b.dataset.itag);
+      const excludedTags = [...root.querySelectorAll(".ai-exclude .ai-xtag.sel")].map((b) => b.dataset.xtag);
+      await runSuggestions(sel, picked, count, excludedTags, includedTags, topic);
+      return true;
+    }
+  );
+
+  modal.addEventListener("click", (e) => {
+    const chip = e.target.closest(".ai-xtag");
+    if (chip) chip.classList.toggle("sel");
+  });
+}
+
+async function runSuggestions(sel, pickedCollections, count, excludedTags = [], includedTags = [], topic = "") {
+  const studying = !!topic;
+  const flowTitle = studying ? "Studying topic" : "Suggesting papers";
+  let close = busyModal(flowTitle, "Reading the selected collections…");
 
   // Fetch every picked collection concurrently, then dedupe.
   let lists;
@@ -597,17 +691,25 @@ async function runSuggestions(sel, pickedCollections, count, excludedTags = [], 
     return;
   }
 
-  // Summarise the current queue (titles + tags) so suggestions complement it.
-  const queueContext = store
-    .pendingInActiveQueue()
-    .slice(0, 40)
-    .map((p) => ({ title: p.title, tags: p.tags }));
-
-  const messages = buildSuggestMessages({ count, candidates: contextItems, queueContext, excludedTags, includedTags });
+  // In topic mode the focus is the user's topic, so the queue isn't used as
+  // context; in suggest mode we summarise the queue (titles + tags) so the model
+  // recommends papers that complement what's already queued.
+  const messages = studying
+    ? buildTopicMessages({ topic, count, candidates: contextItems, excludedTags, includedTags })
+    : buildSuggestMessages({
+        count,
+        candidates: contextItems,
+        queueContext: store
+          .pendingInActiveQueue()
+          .slice(0, 40)
+          .map((p) => ({ title: p.title, tags: p.tags })),
+        excludedTags,
+        includedTags,
+      });
 
   // Swap the spinner message now that we're actually asking the model.
   close();
-  close = busyModal("Suggesting papers", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`, { showElapsed: true });
+  close = busyModal(flowTitle, `Asking ${providerLabel(sel.provider)} · ${sel.model}…`, { showElapsed: true });
   let raw = "";
   try {
     raw = await askAi(messages, { sel, responseSchema: SUGGEST_SCHEMA });
@@ -664,7 +766,7 @@ async function runSuggestions(sel, pickedCollections, count, excludedTags = [], 
     .join("");
 
   const modal = openPreviewModal(
-    `Suggested additions (${rows.length})`,
+    studying ? `Readings to study “${topic}” (${rows.length})` : `Suggested additions (${rows.length})`,
     `<div class="ai-sugg-list" style="max-height:min(520px,60vh)">${list}</div>`,
     () => {
       const checks = [...modal.querySelectorAll('input[type="checkbox"]')];

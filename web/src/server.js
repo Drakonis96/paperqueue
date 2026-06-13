@@ -224,6 +224,46 @@ const app = express();
 // So req.ip reflects the real client behind a reverse proxy (used for rate
 // limiting). Configurable via AUTH_TRUST_PROXY; on by default.
 app.set("trust proxy", config.auth.trustProxy);
+app.disable("x-powered-by");
+
+// MARK: - Security headers ---------------------------------------------------
+// Hardening for self-hosted deployments that may be exposed beyond a trusted
+// network. A strict same-origin CSP backs up the UI's HTML escaping (defence in
+// depth against injected markup), and framing is blocked by default to prevent
+// clickjacking. All same-origin: the browser only ever talks to this server, AI
+// keys stay server-side, the only external image is the inline data: favicon.
+// Toggle/relax via PQ_SECURITY_HEADERS / PQ_FRAME_ANCESTORS (see config.js).
+if (config.security.enabled) {
+  const fa = config.security.frameAncestors;
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    // The UI sets inline style="" attributes (no inline <script>), so styles
+    // need 'unsafe-inline'; scripts stay locked to same-origin.
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    `frame-ancestors ${fa}`,
+  ].join("; ");
+  app.use((_req, res, next) => {
+    res.setHeader("Content-Security-Policy", csp);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+    // X-Frame-Options can't express an origin list, so only set it for the
+    // simple cases; otherwise CSP frame-ancestors does the framing policy.
+    if (fa === "'none'") res.setHeader("X-Frame-Options", "DENY");
+    else if (fa === "'self'") res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    next();
+  });
+}
+
 // AI chat messages carry collection titles / queue lists, so allow a larger body.
 app.use(express.json({ limit: "1mb" }));
 

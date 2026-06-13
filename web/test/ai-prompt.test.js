@@ -11,6 +11,7 @@ import {
   filterIncluded,
   buildReorderMessages,
   buildSuggestMessages,
+  buildTopicMessages,
   ORDER_SCHEMA,
   SUGGEST_SCHEMA,
 } from "../public/js/ai-prompt.js";
@@ -140,4 +141,52 @@ test("buildSuggestMessages omits the exclusion line when there are none", () => 
   });
   assert.ok(!msgs[0].content.includes("never suggest an item carrying"));
   assert.ok(msgs[0].content.includes("the queue is currently empty"));
+});
+
+test("buildTopicMessages embeds the topic, candidates and the legend", () => {
+  const msgs = buildTopicMessages({
+    topic: "  diffusion models  ",
+    count: 6,
+    candidates: [
+      { key: "C1", title: "Denoising Diffusion", authors: "Ho", year: "2020", tags: ["genai", "pq:queue"] },
+      { key: "C2", title: "Score-Based Models", authors: "Song", year: "2021", tags: ["genai"] },
+    ],
+  });
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs[0].role, "system");
+  const sys = msgs[0].content;
+  assert.ok(sys.includes("up to 6 papers"));
+  assert.ok(sys.includes("diffusion models")); // topic is trimmed and embedded
+  assert.ok(!sys.includes("  diffusion models  ")); // trimmed, not raw
+  assert.ok(sys.includes("[C1]") && sys.includes("[C2]"));
+  assert.ok(sys.includes("tags: genai")); // pq: state tags are filtered out
+  assert.ok(!sys.includes("tags: genai, pq:queue")); // not in the candidate's tag list
+  assert.ok(sys.includes(PQ_TAG_LEGEND));
+  assert.ok(sys.includes('{"suggestions":')); // reuses the suggestion output shape
+  // The user turn names the topic.
+  assert.equal(msgs[1].role, "user");
+  assert.ok(msgs[1].content.includes("diffusion models"));
+});
+
+test("buildTopicMessages applies include/exclude tag constraints", () => {
+  const withFilters = buildTopicMessages({
+    topic: "graph neural networks",
+    count: 5,
+    candidates: [{ key: "C1", title: "T", authors: "A", year: "2020", tags: ["graphs"] }],
+    includedTags: ["graphs"],
+    excludedTags: ["surveys"],
+  })[0].content;
+  assert.ok(/only wants papers related to these tags/i.test(withFilters));
+  assert.ok(withFilters.includes("graphs"));
+  assert.ok(/never suggest an item carrying/i.test(withFilters));
+  assert.ok(withFilters.includes("surveys"));
+
+  // No filters ⇒ neither constraint line appears.
+  const plain = buildTopicMessages({
+    topic: "x",
+    count: 3,
+    candidates: [{ key: "C1", title: "T", authors: "A", year: "2020", tags: [] }],
+  })[0].content;
+  assert.ok(!/only wants papers related to these tags/i.test(plain));
+  assert.ok(!/never suggest an item carrying/i.test(plain));
 });

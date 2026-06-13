@@ -153,15 +153,11 @@ PaperQueue/
 │   └── Shared/                # code shared with the widget (App Group snapshot)
 ├── web/                       # self-hosted web edition (Node + browser)
 │   ├── src/                   # Express service: static UI + Zotero proxy + live SSE
-│   ├── public/                # the browser app (vanilla JS, no build step)
+│   ├── public/                # the browser app (vanilla JS, no build step) — installable PWA
 │   └── docker-compose.yml
-├── server/                    # legacy Fastify+SQLite backend — NOT used (superseded by web/)
 ├── altstore-source.json       # AltStore/SideStore source
 └── logo.png
 ```
-
-> `server/` was an earlier OAuth-broker design, kept only for reference. The
-> self-hosted web client now lives in [`web/`](web/).
 
 ## License
 

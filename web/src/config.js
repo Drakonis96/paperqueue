@@ -121,6 +121,22 @@ export const config = {
     trustProxy: process.env.AUTH_TRUST_PROXY === undefined ? true : envFlag("AUTH_TRUST_PROXY"),
   },
 
+  /// Hardening response headers (CSP, X-Frame-Options, nosniff…) added to every
+  /// response. ON by default — important if you expose PaperQueue beyond a
+  /// trusted network. Set PQ_SECURITY_HEADERS=0 to disable (e.g. when a reverse
+  /// proxy already adds equivalent headers). `frameAncestors` controls who may
+  /// embed the app in an <iframe>: the default `'none'` blocks all framing
+  /// (clickjacking). To embed it in a self-hosted dashboard (Heimdall, Organizr,
+  /// Homepage…), set PQ_FRAME_ANCESTORS to `'self'` or a space-separated list of
+  /// allowed origins, e.g. "https://dash.example.com".
+  security: {
+    enabled:
+      process.env.PQ_SECURITY_HEADERS === undefined
+        ? true
+        : envFlag("PQ_SECURITY_HEADERS"),
+    frameAncestors: (process.env.PQ_FRAME_ANCESTORS || "'none'").trim() || "'none'",
+  },
+
   /// AI assistant providers. Keys live ONLY here (server-side) — they are never
   /// returned to the browser and never logged. Leave a key empty to disable that
   /// provider. The custom slot is any OpenAI-compatible endpoint (Ollama, Groq…).

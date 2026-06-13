@@ -153,11 +153,30 @@ async function init() {
   await bootApp();
 }
 
+// Registers the PWA service worker (public/sw.js). The `?v=` query keys its
+// cache to the running version so a new release activates a fresh worker and the
+// old cache is purged. Registration is a progressive enhancement — failures
+// (unsupported browser, insecure origin) are swallowed.
+function registerServiceWorker(version) {
+  if (!("serviceWorker" in navigator)) return;
+  // Service workers only run on secure origins (https or localhost).
+  if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+    return;
+  }
+  const v = encodeURIComponent(version || "dev");
+  navigator.serviceWorker.register(`/sw.js?v=${v}`).catch(() => {
+    /* PWA is optional — ignore registration errors */
+  });
+}
+
 let booted = false;
 async function bootApp() {
   if (booted) return; // never wire listeners / subscriptions twice
   booted = true;
   await store.loadConfig();
+  // PWA: register the service worker once we know the app version, so its cache
+  // is keyed to this release (a new version installs a fresh worker).
+  registerServiceWorker(store.config.version);
   // Settings live on the server (shared across devices), reconciled before the
   // first meaningful render so queues / goal / AI favourites are right away.
   await store.loadSettings();
@@ -429,6 +448,9 @@ function queueView() {
   const suggestAIBtn = store.config.ai
     ? `<button class="btn ai-order-btn" data-act="suggestAI" title="Get suggestions from a collection">${I("sparkle", 16)} Suggest with AI</button>`
     : "";
+  const studyAIBtn = store.config.ai
+    ? `<button class="btn ai-order-btn" data-act="studyAI" title="Pick a topic to study and get reading suggestions from your collections">${I("book", 16)} Study a topic</button>`
+    : "";
   const tabs = store.availableQueues
     .map((q) => {
       const count = store.pendingInQueue(q).length;
@@ -453,6 +475,7 @@ function queueView() {
         <input id="queue-search" type="text" placeholder="Search queue" value="${attr(ui.queueSearch)}" />
       </div>
       <div class="spacer" style="flex:1"></div>
+      ${studyAIBtn}
       ${suggestAIBtn}
       ${orderAIBtn}
     </div>`;
@@ -2031,6 +2054,8 @@ function handleAction(act, target) {
       return ai?.orderQueue();
     case "suggestAI":
       return ai?.addSuggestions();
+    case "studyAI":
+      return ai?.studyTopic();
     case "aiModels":
       return aiModelsModal(key);
     case "aiToggleFav": {

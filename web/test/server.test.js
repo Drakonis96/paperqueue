@@ -136,3 +136,36 @@ test("update endpoint returns a well-formed payload", async () => {
   assert.equal(typeof u.current, "string");
   assert.equal(typeof u.updateAvailable, "boolean");
 });
+
+test("security headers are present on responses", async () => {
+  const res = await fetch(`${base}/api/health`);
+  const csp = res.headers.get("content-security-policy");
+  assert.ok(csp, "CSP header should be set");
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
+  assert.ok(res.headers.get("referrer-policy"));
+  // The Express fingerprint should be suppressed.
+  assert.equal(res.headers.get("x-powered-by"), null);
+});
+
+test("PQ_FRAME_ANCESTORS would relax framing (default is locked down)", async () => {
+  // The running instance uses the default, so this just asserts the safe default
+  // is in effect (the override path is covered by config.js parsing).
+  const res = await fetch(`${base}/`);
+  assert.match(res.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+});
+
+test("PWA assets are served", async () => {
+  const manifest = await fetch(`${base}/manifest.webmanifest`);
+  assert.equal(manifest.status, 200);
+  const json = await manifest.json();
+  assert.equal(json.name, "PaperQueue");
+  assert.equal(json.display, "standalone");
+  assert.ok(Array.isArray(json.icons) && json.icons.length >= 2);
+
+  const sw = await fetch(`${base}/sw.js`);
+  assert.equal(sw.status, 200);
+  assert.match(sw.headers.get("content-type") || "", /javascript/);
+});
