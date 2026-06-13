@@ -24,7 +24,7 @@
           "date": "2026-06-13",
           "localizedDescription": "Web edition only in this release — no functional changes to the iPhone/iPad app; the version is kept aligned across platforms.\n\n• New AI mode — “Study a topic”: type what you want to learn, pick reference collections, and the assistant suggests readings to go deeper, based on the titles.\n• The web app is now an installable PWA — add it to your home screen for a fullscreen, offline-capable app.\n• Hardened for self-hosting: security headers (Content-Security-Policy, anti-clickjacking, nosniff) on every response.\n• Smoother sync on large libraries: PaperQueue now honours Zotero's rate-limit (Backoff / Retry-After) signals.",
           "downloadURL": "https://github.com/Drakonis96/paperqueue/releases/download/v1.21.0/PaperQueue-unsigned.ipa",
-          "size": 1519040,
+          "size": 1519038,
           "minOSVersion": "17.0"
         },
         {
