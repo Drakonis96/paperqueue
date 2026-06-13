@@ -1492,6 +1492,78 @@ pre.code {
   font-size: 12px;
   padding: 0 8px;
 }
+
+/* Model picker (Settings → AI assistant → Load models): a clean vertical list,
+   one model per row, star = favourite. OpenRouter is grouped by provider. */
+#ai-models-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-model-group + .ai-model-group {
+  margin-top: 8px;
+}
+.ai-model-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--card);
+  padding: 8px 6px 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.ai-model-group-count {
+  font-weight: 600;
+  color: var(--text-3);
+}
+.ai-model-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card-2);
+  color: var(--text);
+  font: inherit;
+}
+.ai-model-row:hover {
+  border-color: var(--accent);
+}
+.ai-model-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  word-break: break-word;
+}
+.ai-model-star {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-3);
+}
+.ai-model-row.fav {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ai-model-row.fav .ai-model-star {
+  color: var(--accent);
+}
+.ai-model-row.fav .ai-model-star svg {
+  fill: var(--accent);
+}
 .ai-icon {
   width: 32px;
   height: 32px;

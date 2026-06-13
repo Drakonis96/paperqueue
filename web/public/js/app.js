@@ -1018,17 +1018,45 @@ function renderAiModelsBody() {
   if (!b) return;
   const q = (ui.aiModelSearch || "").toLowerCase();
   const list = aiModelsAll.filter((m) => !q || m.id.toLowerCase().includes(q));
-  b.innerHTML = list.length
-    ? list
-        .map((m) => {
-          const fav = store.isFavorite(aiModelsProvider, m.id);
-          return `<button class="ai-model-row ${fav ? "fav" : ""}" data-act="aiToggleFav:${aiModelsProvider}:${encodeURIComponent(m.id)}">
-            <span class="ai-model-star">${I("star", 16)}</span>
-            <span style="flex:1;text-align:left;word-break:break-all">${esc(m.id)}</span>
-          </button>`;
-        })
-        .join("")
-    : `<div style="padding:20px;color:var(--text-3)">No models match.</div>`;
+  if (!list.length) {
+    b.innerHTML = `<div style="padding:20px;color:var(--text-3)">No models match.</div>`;
+    return;
+  }
+
+  // One row per model (full-width list), starred = favourite. `display` lets the
+  // grouped view show the short name while the toggle keeps the full id.
+  const row = (m, display = m.id) => {
+    const fav = store.isFavorite(aiModelsProvider, m.id);
+    return `<button class="ai-model-row ${fav ? "fav" : ""}" data-act="aiToggleFav:${aiModelsProvider}:${encodeURIComponent(m.id)}" title="${attr(m.id)}">
+      <span class="ai-model-star">${I("star", 16)}</span>
+      <span class="ai-model-name">${esc(display)}</span>
+    </button>`;
+  };
+  const byId = (a, b) => a.id.toLowerCase().localeCompare(b.id.toLowerCase());
+
+  // OpenRouter ids are "provider/model" — group them by provider, both the
+  // groups and the models within each sorted alphabetically.
+  if (aiModelsProvider === "openrouter" && list.some((m) => m.id.includes("/"))) {
+    const groups = new Map();
+    for (const m of list) {
+      const slash = m.id.indexOf("/");
+      const prov = slash > 0 ? m.id.slice(0, slash) : "other";
+      (groups.get(prov) || groups.set(prov, []).get(prov)).push(m);
+    }
+    b.innerHTML = [...groups.keys()]
+      .sort((a, c) => a.localeCompare(c))
+      .map((prov) => {
+        const models = groups.get(prov).sort(byId);
+        const rows = models
+          .map((m) => row(m, m.id.slice(m.id.indexOf("/") + 1)))
+          .join("");
+        return `<div class="ai-model-group"><div class="ai-model-group-head">${esc(prov)}<span class="ai-model-group-count">${models.length}</span></div>${rows}</div>`;
+      })
+      .join("");
+    return;
+  }
+
+  b.innerHTML = list.slice().sort(byId).map((m) => row(m)).join("");
 }
 
 // ---------------------------------------------------------------------------
