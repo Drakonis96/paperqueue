@@ -125,6 +125,7 @@ const ui = {
   // Stats calendar: first day of the displayed month (defaults to this month).
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   update: null, // { current, latest, url } when a newer release is available
+  auth: { enabled: false, authenticated: true }, // optional basic auth status
 };
 
 const TABS = [
@@ -141,6 +142,21 @@ const TABS = [
 init();
 
 async function init() {
+  // Optional basic auth: when the server has it on and we're not signed in, show
+  // the login screen and stop here until the user authenticates.
+  const auth = await api.authStatus().catch(() => ({ enabled: false, authenticated: true }));
+  ui.auth = auth;
+  if (auth.enabled && !auth.authenticated) {
+    renderLogin();
+    return;
+  }
+  await bootApp();
+}
+
+let booted = false;
+async function bootApp() {
+  if (booted) return; // never wire listeners / subscriptions twice
+  booted = true;
   await store.loadConfig();
   // Settings live on the server (shared across devices), reconciled before the
   // first meaningful render so queues / goal / AI favourites are right away.
@@ -371,7 +387,7 @@ function paperRow(p, { position, actions = "", draggable = false, showStatus = f
       statusBadge = `<span class="status-chip queued">${p.queueName ? esc(p.queueName) : "In queue"} ✓</span>`;
   }
   return `
-  <div class="row" ${draggable ? `draggable="true" data-key="${p.key}"` : ""}>
+  <div class="row${draggable ? " reorderable" : ""}" ${draggable ? `data-key="${p.key}"` : ""}>
     <div class="lead ${pdf}">
       ${I("doc", 20)}
       ${posBadge}
@@ -390,10 +406,16 @@ function paperRow(p, { position, actions = "", draggable = false, showStatus = f
 // Queue view
 // ---------------------------------------------------------------------------
 function queueView() {
-  let papers = store.pendingInActiveQueue();
+  const fullQueue = store.pendingInActiveQueue();
+  // Real 1-based position of every paper in the *unfiltered* queue. A search
+  // narrows which rows are shown but must never renumber them — a paper keeps the
+  // number it actually holds in the queue.
+  const positionByKey = new Map(fullQueue.map((p, i) => [p.key, i + 1]));
+  let papers = fullQueue;
   const isPostponed = store.activeQueue === POSTPONED_QUEUE;
+  const searching = !!ui.queueSearch;
 
-  if (ui.queueSearch) {
+  if (searching) {
     const q = ui.queueSearch.toLowerCase();
     papers = papers.filter(
       (p) => p.title.toLowerCase().includes(q) || authorLine(p).toLowerCase().includes(q)
@@ -435,6 +457,13 @@ function queueView() {
       ${orderAIBtn}
     </div>`;
 
+  if (!papers.length && searching) {
+    return (
+      queueSelector +
+      `<div class="list"><div class="empty" style="padding:40px 10px"><p>No papers in this queue match “${esc(ui.queueSearch)}”.</p></div></div>`
+    );
+  }
+
   if (!papers.length) {
     if (isPostponed) {
       return (
@@ -454,11 +483,17 @@ function queueView() {
     );
   }
 
+  // Reordering operates on the full queue, so the drag handle is only offered
+  // when no search is narrowing the list (you can't meaningfully reorder a
+  // filtered subset). Searching keeps real positions but hides the handle.
+  const dragHandle = searching
+    ? ""
+    : `<span class="act drag" title="Drag to reorder">${I("grip", 18)}</span>`;
   const rows = papers
-    .map((p, i) =>
+    .map((p) =>
       paperRow(p, {
-        position: i + 1,
-        draggable: true,
+        position: positionByKey.get(p.key),
+        draggable: !searching,
         meta: p.pages ? `${p.pages}${p.pageCount ? ` (${p.pageCount} pp)` : ""}` : null,
         actions: isPostponed
           ? `
@@ -466,21 +501,24 @@ function queueView() {
           <button class="act accent" data-act="returnToQueue:${p.key}" title="Move back to reading queue">${I("uturn", 18)}</button>
           <button class="act" data-act="skip:${p.key}" title="Skip">${I("x", 18)}</button>
           <button class="act red" data-act="remove:${p.key}" title="Remove">${I("minusCircle", 18)}</button>
-          <span class="act drag" title="Drag to reorder">${I("grip", 18)}</span>`
+          ${dragHandle}`
           : `
           <button class="act green" data-act="markRead:${p.key}" title="Mark read">${I("check", 18)}</button>
           <button class="act orange" data-act="postpone:${p.key}" title="Postpone">${I("clock", 18)}</button>
           <button class="act" data-act="skip:${p.key}" title="Skip">${I("x", 18)}</button>
           <button class="act red" data-act="remove:${p.key}" title="Remove from queue">${I("minusCircle", 18)}</button>
-          <span class="act drag" title="Drag to reorder">${I("grip", 18)}</span>`,
+          ${dragHandle}`,
       })
     )
     .join("");
 
+  const headHint = searching
+    ? `${papers.length} of ${fullQueue.length} shown`
+    : `${papers.length} ${isPostponed ? "postponed" : "to read"} · drag the handle to reorder, or drop onto a queue tab to move it`;
   return (
     queueSelector +
     `<div class="list" id="queue-list">
-      <div class="list-head">${papers.length} ${isPostponed ? "postponed" : "to read"} · drag the handle to reorder, or drop onto a queue tab to move it</div>
+      <div class="list-head">${headHint}</div>
       ${rows}
     </div>`
   );
@@ -816,6 +854,8 @@ function statsView() {
       <div class="card streak-card"><div style="color:var(--yellow)">${I("trophy", 24)}</div><div class="num">${s.longestStreakDays}</div><div class="cap">${s.longestStreakDays === 1 ? "day" : "days"} · best streak</div></div>
     </div>`;
 
+  const comeback = comebackCard(s.comeback);
+
   const card = (label, value, unit, icon, color) => `
     <div class="stat-card">
       <div class="label" style="color:${color}">${I(icon, 15)} ${label}</div>
@@ -835,7 +875,30 @@ function statsView() {
     ${card("Library", s.libraryCount, "items", "library", "var(--blue)")}
   </div>`;
 
-  return hero + streaks + grid + calendar(s) + weeklyChart(s, "papers") + weeklyChart(s, "pages");
+  return hero + streaks + comeback + grid + calendar(s) + weeklyChart(s, "papers") + weeklyChart(s, "pages");
+}
+
+// "Comeback" card: shown when extra reading on strong days this week has made up
+// for one or more earlier days that fell short of the goal.
+function comebackCard(c) {
+  if (!c || !c.active) return "";
+  const papers = (n) => `${n} ${n === 1 ? "paper" : "papers"}`;
+  const days = (n) => `${n} ${n === 1 ? "day" : "days"}`;
+  const headline = c.onTrack ? "You're back on track 🎉" : "Clawing your way back";
+  const detail = c.onTrack
+    ? `You made up for ${days(c.missedDays)} below your goal this week — ${papers(c.recovered)} recovered. Nice comeback.`
+    : `${papers(c.recovered)} recovered from ${days(c.missedDays)} below goal this week — ${papers(c.behind)} to go to catch up.`;
+  return `
+    <div class="card comeback-card ${c.onTrack ? "ontrack" : ""}">
+      <div class="comeback-ico">${I("trophy", 24)}</div>
+      <div class="comeback-body">
+        <div class="comeback-head">${headline}</div>
+        <div class="comeback-detail">${esc(detail)}</div>
+        <div class="comeback-meter" title="${c.weekReadElapsed} read vs ${c.weekGoalElapsed} target this week">
+          <i style="width:${Math.min(100, c.weekGoalElapsed ? Math.round((c.weekReadElapsed / c.weekGoalElapsed) * 100) : 100)}%"></i>
+        </div>
+      </div>
+    </div>`;
 }
 
 function calendar(s) {
@@ -879,6 +942,7 @@ function calendar(s) {
     <div class="cal-grid-head">${head}</div>
     <div class="cal-grid">${cells}</div>
     <div class="cal-legend">
+      <span><i class="dot exceeded"></i> Over goal</span>
       <span><i class="dot green"></i> Goal met</span>
       <span><i class="dot orange"></i> Partial</span>
       <span><i class="dot red"></i> Missed</span>
@@ -928,6 +992,15 @@ function settingsView() {
         <div class="grow">Sync library now</div>
         <button class="btn sm" data-act="sync" ${store.isSyncing ? "disabled" : ""}>${I("refresh", 15)} Sync</button>
       </div>
+      ${
+        ui.auth?.enabled
+          ? `<div class="settings-row">
+        <div style="color:var(--text-3)">${I("logout", 18)}</div>
+        <div class="grow"><div style="font-weight:600">Sign out</div><div style="font-size:12.5px;color:var(--text-3)">End this session on this device.</div></div>
+        <button class="btn sm" data-act="logout">${I("logout", 15)} Sign out</button>
+      </div>`
+          : ""
+      }
     </div>`;
 
   const goalSection = `
@@ -1176,10 +1249,81 @@ services:
 }
 
 // ---------------------------------------------------------------------------
+// Login screen (only when the server has optional basic auth enabled)
+// ---------------------------------------------------------------------------
+function renderLogin(error = "") {
+  const app = $("#app");
+  app.innerHTML = `<div class="setup login-screen">
+    <div class="hero-logo">${I("layers", 34)}</div>
+    <h1>Sign in to PaperQueue</h1>
+    <p class="lede">This instance is password-protected. Enter your credentials to continue.</p>
+    <form id="login-form" class="card login-card" autocomplete="on">
+      <div class="field"><label>Username</label><input id="login-user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" /></div>
+      <div class="field"><label>Password</label><input id="login-pass" type="password" autocomplete="current-password" /></div>
+      <div id="login-error" class="login-error">${esc(error)}</div>
+      <button class="btn primary" type="submit" id="login-submit">${I("key", 16)} Sign in</button>
+    </form>
+  </div>`;
+  setTimeout(() => $("#login-user")?.focus(), 50);
+}
+
+async function submitLogin(e) {
+  e?.preventDefault();
+  const user = $("#login-user")?.value || "";
+  const pass = $("#login-pass")?.value || "";
+  const btn = $("#login-submit");
+  const err = $("#login-error");
+  if (err) err.textContent = "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Signing in…";
+  }
+  try {
+    await api.login(user, pass);
+    ui.auth = { enabled: true, authenticated: true };
+    window.__pqAuthBounced = false;
+    await bootApp();
+  } catch (e2) {
+    if (err) err.textContent = e2.message || "Sign in failed.";
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `${I("key", 16)} Sign in`;
+    }
+    $("#login-pass")?.focus();
+  }
+}
+
+document.addEventListener("submit", (e) => {
+  if (e.target && e.target.id === "login-form") submitLogin(e);
+});
+
+// ---------------------------------------------------------------------------
 // Modals
 // ---------------------------------------------------------------------------
+// Background scroll lock. While a modal is open the page behind it is frozen
+// (and its scroll position preserved), so the two scroll regions are fully
+// independent: scrolling the modal never bleeds through to the page, and hitting
+// the top/bottom of the modal's content doesn't nudge the background. Combined
+// with `overscroll-behavior: contain` on the modal itself in CSS.
+let savedScrollY = 0;
+function lockBodyScroll() {
+  if (document.body.classList.contains("modal-locked")) return; // idempotent
+  savedScrollY = window.scrollY;
+  document.body.style.top = `-${savedScrollY}px`;
+  document.body.classList.add("modal-locked");
+}
+function unlockBodyScroll() {
+  if (!document.body.classList.contains("modal-locked")) return;
+  document.body.classList.remove("modal-locked");
+  document.body.style.top = "";
+  window.scrollTo(0, savedScrollY);
+}
+
 function openModal(html) {
-  closeModal();
+  // Replace any existing modal without toggling the scroll lock (avoids a jump
+  // when one modal immediately reopens another).
+  $(".modal-backdrop")?.remove();
+  lockBodyScroll();
   const back = document.createElement("div");
   back.className = "modal-backdrop";
   back.innerHTML = `<div class="modal">${html}</div>`;
@@ -1191,6 +1335,7 @@ function openModal(html) {
 }
 function closeModal() {
   $(".modal-backdrop")?.remove();
+  unlockBodyScroll();
 }
 
 function modalShell(title, body, foot = "") {
@@ -1651,6 +1796,9 @@ function handleAction(act, target) {
     }
     case "shortcuts":
       return shortcutsModal();
+    case "logout":
+      api.logout().finally(() => location.reload());
+      return;
     case "dismissUpdate":
       if (ui.update) localStorage.setItem("pq.update.dismissed", ui.update.latest);
       ui.update = null;
@@ -2057,7 +2205,9 @@ function scheduleReminderCheck() {
 }
 
 // ---------------------------------------------------------------------------
-// Drag-to-reorder (queue)
+// Drag-to-reorder (queue) — Pointer Events, so it works with a mouse AND with
+// touch. Dragging starts on the grip handle: the row reorders live within the
+// list, and dropping onto another queue tab moves the paper to that queue.
 // ---------------------------------------------------------------------------
 // Floating "scroll to top" button — shown on any tab once you've scrolled down.
 let scrollListenerAttached = false;
@@ -2066,7 +2216,6 @@ function updateScrollFab() {
   if (fab) fab.classList.toggle("visible", window.scrollY > 380);
 }
 
-let dragKey = null;
 function bindDynamic() {
   if (!scrollListenerAttached) {
     const onScroll = () => {
@@ -2086,61 +2235,132 @@ function bindDynamic() {
   }
   updateScrollFab();
   renderLibWindow();
+  initQueueDrag();
+}
 
-  // Queue tabs are drop targets: dragging a paper onto another tab moves it to
-  // that queue. Wired whenever the tab strip is present.
-  document.querySelectorAll(".qtab[data-drop-queue]").forEach((tab) => {
-    tab.addEventListener("dragover", (e) => {
-      if (!dragKey) return;
-      e.preventDefault();
-      tab.classList.add("qtab-drop");
-    });
-    tab.addEventListener("dragleave", () => tab.classList.remove("qtab-drop"));
-    tab.addEventListener("drop", (e) => {
-      tab.classList.remove("qtab-drop");
-      if (!dragKey) return;
-      e.preventDefault();
-      const paper = store.papers.get(dragKey);
-      const target = tab.dataset.dropQueue;
-      if (paper && target && paper.queueName !== store.storedName(target)) {
-        store.moveToQueue(paper, target);
-        toast(`Moved to “${target}”`, "success");
-      }
-    });
-  });
+// Live drag state for the active gesture (null when not dragging).
+let queueDrag = null;
+let autoScrollRAF = null;
 
+function initQueueDrag() {
   const list = $("#queue-list");
   if (!list) return;
-  const rows = list.querySelectorAll(".row[draggable]");
-  rows.forEach((row) => {
-    row.addEventListener("dragstart", (e) => {
-      dragKey = row.dataset.key;
-      row.classList.add("dragging");
-      e.dataTransfer.effectAllowed = "move";
-    });
-    row.addEventListener("dragend", () => {
-      dragKey = null;
-      row.classList.remove("dragging");
-      list.querySelectorAll(".drop-target").forEach((r) => r.classList.remove("drop-target"));
-      document.querySelectorAll(".qtab-drop").forEach((t) => t.classList.remove("qtab-drop"));
-    });
-    row.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      list.querySelectorAll(".drop-target").forEach((r) => r.classList.remove("drop-target"));
-      row.classList.add("drop-target");
-    });
-    row.addEventListener("drop", (e) => {
-      e.preventDefault();
-      row.classList.remove("drop-target");
-      if (!dragKey || dragKey === row.dataset.key) return;
-      const papers = store.pendingInActiveQueue();
-      const from = papers.findIndex((p) => p.key === dragKey);
-      const to = papers.findIndex((p) => p.key === row.dataset.key);
-      if (from < 0 || to < 0) return;
-      const arr = [...papers];
-      const [moved] = arr.splice(from, 1);
-      arr.splice(to, 0, moved);
-      store.reorderPending(arr);
-    });
+  list.querySelectorAll(".act.drag").forEach((handle) => {
+    handle.addEventListener("pointerdown", (e) => startQueueDrag(e, handle, list));
   });
+}
+
+function startQueueDrag(e, handle, list) {
+  if (queueDrag || e.button > 0) return; // ignore right/middle click
+  const row = handle.closest(".row[data-key]");
+  if (!row) return;
+  e.preventDefault();
+  queueDrag = { key: row.dataset.key, row, list, pointerId: e.pointerId, tab: null, scrollDir: 0 };
+  row.classList.add("dragging");
+  row.style.pointerEvents = "none"; // so elementFromPoint sees what's underneath
+  document.body.classList.add("dragging-active");
+  try {
+    handle.setPointerCapture(e.pointerId);
+  } catch {
+    /* capture is best-effort */
+  }
+  document.addEventListener("pointermove", onQueueDragMove);
+  document.addEventListener("pointerup", endQueueDrag);
+  document.addEventListener("pointercancel", endQueueDrag);
+}
+
+function onQueueDragMove(e) {
+  if (!queueDrag) return;
+  e.preventDefault();
+  const { list, row } = queueDrag;
+  const x = e.clientX;
+  const y = e.clientY;
+
+  // A queue tab under the pointer → cross-queue move target.
+  const under = document.elementFromPoint(x, y);
+  const tab = under && under.closest ? under.closest(".qtab[data-drop-queue]") : null;
+  document.querySelectorAll(".qtab-drop").forEach((t) => t.classList.remove("qtab-drop"));
+  queueDrag.tab = tab || null;
+  if (tab) {
+    tab.classList.add("qtab-drop");
+  } else {
+    // Otherwise reorder within the list by sliding the row to the gap nearest
+    // the pointer.
+    const after = dragAfterRow(list, y);
+    if (after == null) list.appendChild(row);
+    else if (after !== row) list.insertBefore(row, after);
+  }
+  autoScrollEdges(y);
+}
+
+/** The first queue row whose vertical midpoint is below `y` — the row the
+ *  dragged item should be inserted *before*. Returns null to append at the end. */
+function dragAfterRow(list, y) {
+  const rows = [...list.querySelectorAll(".row[data-key]:not(.dragging)")];
+  for (const r of rows) {
+    const box = r.getBoundingClientRect();
+    if (y < box.top + box.height / 2) return r;
+  }
+  return null;
+}
+
+function endQueueDrag() {
+  if (!queueDrag) return;
+  const { key, row, list, tab } = queueDrag;
+  document.removeEventListener("pointermove", onQueueDragMove);
+  document.removeEventListener("pointerup", endQueueDrag);
+  document.removeEventListener("pointercancel", endQueueDrag);
+  stopAutoScroll();
+  row.classList.remove("dragging");
+  row.style.pointerEvents = "";
+  document.body.classList.remove("dragging-active");
+  document.querySelectorAll(".qtab-drop").forEach((t) => t.classList.remove("qtab-drop"));
+  queueDrag = null;
+
+  if (tab) {
+    const paper = store.papers.get(key);
+    const target = tab.dataset.dropQueue;
+    if (paper && target && paper.queueName !== store.storedName(target)) {
+      store.moveToQueue(paper, target);
+      toast(`Moved to “${target}”`, "success");
+    } else {
+      render(); // dropped on its own tab — rebuild to undo any visual shuffle
+    }
+    return;
+  }
+
+  // Commit the new order from the DOM (notify() re-renders either way).
+  const ordered = [...list.querySelectorAll(".row[data-key]")]
+    .map((r) => store.papers.get(r.dataset.key))
+    .filter(Boolean);
+  store.reorderPending(ordered);
+}
+
+// Auto-scroll the page when the pointer nears the top/bottom edge mid-drag, so
+// long queues are reorderable on a small touchscreen.
+function autoScrollEdges(y) {
+  const margin = 80;
+  const vh = window.innerHeight;
+  let dir = 0;
+  if (y < margin) dir = -1;
+  else if (y > vh - margin) dir = 1;
+  if (!queueDrag || dir === 0) return stopAutoScroll();
+  queueDrag.scrollDir = dir;
+  if (autoScrollRAF) return;
+  const step = () => {
+    if (!queueDrag || !queueDrag.scrollDir) {
+      autoScrollRAF = null;
+      return;
+    }
+    window.scrollBy(0, queueDrag.scrollDir * 12);
+    autoScrollRAF = requestAnimationFrame(step);
+  };
+  autoScrollRAF = requestAnimationFrame(step);
+}
+function stopAutoScroll() {
+  if (queueDrag) queueDrag.scrollDir = 0;
+  if (autoScrollRAF) {
+    cancelAnimationFrame(autoScrollRAF);
+    autoScrollRAF = null;
+  }
 }

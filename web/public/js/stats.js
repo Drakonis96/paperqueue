@@ -128,6 +128,48 @@ export function computeStats(papers, { goal = 1, now = new Date(), weeks = 8 } =
     .sort()
     .map((k) => ({ weekStart: k, papersRead: buckets[k], pagesRead: pageBuckets[k] }));
 
+  // Comeback tracking. Within the current (Monday-anchored) week, up to and
+  // including today, sum the shortfall on under-goal days and the surplus on
+  // over-goal days. When surplus offsets earlier deficits, the reader is
+  // "catching up" — a comeback. `recovered` is how many papers of the deficit
+  // the surplus has clawed back; `onTrack` means the week's running total has
+  // reached goal × days-elapsed despite the slow days.
+  const todayStart = startOfDay(now);
+  let weekDeficit = 0;
+  let weekSurplus = 0;
+  let weekReadElapsed = 0;
+  let daysElapsed = 0;
+  let missedDays = 0;
+  for (let d = new Date(weekStartDate); d <= todayStart; d = addDays(d, 1)) {
+    daysElapsed++;
+    const c = counts[dayKey(d)] || 0;
+    weekReadElapsed += c;
+    if (c >= goal) {
+      weekSurplus += c - goal;
+    } else {
+      // A day below goal. Today is still "in progress", so it doesn't yet count
+      // as a missed day, but its shortfall still needs making up this week.
+      weekDeficit += goal - c;
+      if (d.getTime() !== todayStart.getTime()) missedDays++;
+    }
+  }
+  const weekGoalElapsed = goal * daysElapsed;
+  const recovered = Math.min(weekSurplus, weekDeficit);
+  const comeback = {
+    daysElapsed,
+    weekReadElapsed,
+    weekGoalElapsed,
+    weekDeficit,
+    weekSurplus,
+    missedDays,
+    recovered,
+    behind: Math.max(weekGoalElapsed - weekReadElapsed, 0),
+    onTrack: weekReadElapsed >= weekGoalElapsed,
+    // A comeback is worth surfacing when extra reading has made up for at least
+    // one missed day earlier in the same week.
+    active: recovered > 0 && missedDays > 0,
+  };
+
   return {
     dailyGoal: goal,
     readToday,
@@ -149,6 +191,7 @@ export function computeStats(papers, { goal = 1, now = new Date(), weeks = 8 } =
     perWeek,
     countsByDay: counts,
     firstActiveDay,
+    comeback,
     goalMetToday: readToday >= goal,
     todayProgress: goal > 0 ? Math.min(readToday / goal, 1) : 1,
   };
@@ -161,10 +204,12 @@ export function dayStatus(date, { countsByDay, goal, firstActiveDay, now = new D
   if (day > today) return "future";
   const count = countsByDay[dayKey(day)] || 0;
   if (day.getTime() === today.getTime()) {
+    if (count > goal) return "exceeded";
     if (count >= goal) return "met";
     return count > 0 ? "partial" : "today";
   }
   if (!firstActiveDay || day < startOfDay(firstActiveDay)) return "untracked";
+  if (count > goal) return "exceeded";
   if (count >= goal) return "met";
   return count > 0 ? "partial" : "missed";
 }

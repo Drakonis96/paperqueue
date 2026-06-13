@@ -18,6 +18,20 @@ import { zoteroItemForDOI } from "./crossref.js";
 import { aiConfig, aiEnabled, listModels, streamChat } from "./ai.js";
 import { readSettings, writeSettings, readSnapshot, writeSnapshot } from "./storage.js";
 import { checkForUpdate } from "./update.js";
+import {
+  authEnabled,
+  COOKIE_NAME,
+  parseCookies,
+  validSession,
+  createSession,
+  destroySession,
+  checkCredentials,
+  rateState,
+  recordFailure,
+  recordSuccess,
+  sessionMaxAgeMs,
+  cookieSecure,
+} from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
@@ -207,8 +221,83 @@ function broadcastChanged(version) {
 // MARK: - App ----------------------------------------------------------------
 
 const app = express();
+// So req.ip reflects the real client behind a reverse proxy (used for rate
+// limiting). Configurable via AUTH_TRUST_PROXY; on by default.
+app.set("trust proxy", config.auth.trustProxy);
 // AI chat messages carry collection titles / queue lists, so allow a larger body.
 app.use(express.json({ limit: "1mb" }));
+
+// MARK: - Authentication (optional) ------------------------------------------
+// When AUTH_ENABLED=1, the data API is gated behind a session cookie. The static
+// frontend (the app shell + login form) and the auth/health endpoints stay open
+// so the login UI can load; everything that touches the library requires a valid
+// session.
+
+const OPEN_API_PATHS = new Set(["/api/auth", "/api/login", "/api/logout", "/api/health"]);
+
+function clientIp(req) {
+  return req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+app.use((req, res, next) => {
+  if (!authEnabled()) return next();
+  // Only API routes are protected; static assets serve the login shell.
+  if (!req.path.startsWith("/api/")) return next();
+  if (OPEN_API_PATHS.has(req.path)) return next();
+  const cookies = parseCookies(req.headers.cookie);
+  if (validSession(cookies[COOKIE_NAME])) return next();
+  return res.status(401).json({ error: "Authentication required.", authRequired: true });
+});
+
+app.get("/api/auth", (req, res) => {
+  if (!authEnabled()) return res.json({ enabled: false, authenticated: true });
+  const cookies = parseCookies(req.headers.cookie);
+  res.json({ enabled: true, authenticated: validSession(cookies[COOKIE_NAME]) });
+});
+
+app.post("/api/login", (req, res) => {
+  if (!authEnabled()) return res.json({ ok: true });
+  const ip = clientIp(req);
+  const rs = rateState(ip);
+  if (rs.blocked) {
+    return res
+      .status(429)
+      .set("Retry-After", String(rs.retryAfter))
+      .json({
+        error: `Too many attempts. Try again in ${Math.ceil(rs.retryAfter / 60)} min.`,
+        retryAfter: rs.retryAfter,
+      });
+  }
+  const { username, password } = req.body || {};
+  if (checkCredentials(username, password)) {
+    recordSuccess(ip);
+    const token = createSession();
+    res.cookie(COOKIE_NAME, token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: cookieSecure(),
+      maxAge: sessionMaxAgeMs(),
+      path: "/",
+    });
+    return res.json({ ok: true });
+  }
+  const after = recordFailure(ip);
+  const status = after.blocked ? 429 : 401;
+  res.status(status).json({
+    error: after.blocked
+      ? `Too many attempts. Try again in ${Math.ceil(after.retryAfter / 60)} min.`
+      : "Incorrect username or password.",
+    remaining: after.remaining,
+    retryAfter: after.retryAfter || undefined,
+  });
+});
+
+app.post("/api/logout", (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  destroySession(cookies[COOKIE_NAME]);
+  res.clearCookie(COOKIE_NAME, { path: "/" });
+  res.json({ ok: true });
+});
 
 function requireClient(res) {
   if (!state.client) {

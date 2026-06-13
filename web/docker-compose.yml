@@ -25,6 +25,12 @@ services:
       DATA_DIR: /data
       # Read a group library instead of your personal one (optional):
       # ZOTERO_LIBRARY: groups/123456
+      # Optional basic auth — OFF by default (no credentials required). Set
+      # AUTH_ENABLED=1 and your own user/pass to require a login. Defaults if
+      # enabled without overriding: admin / paperqueue. Attempts are rate-limited.
+      AUTH_ENABLED: ${AUTH_ENABLED:-}
+      AUTH_USERNAME: ${AUTH_USERNAME:-}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
       # AI assistant (optional) — keys stay on the server, never sent to browsers.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

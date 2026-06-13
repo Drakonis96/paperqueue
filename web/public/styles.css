@@ -568,6 +568,22 @@ a {
 }
 .act.drag {
   cursor: grab;
+  /* Claim the touch gesture so dragging the handle reorders instead of scrolling
+     the page — this is what makes drag-to-reorder work on touchscreens. */
+  touch-action: none;
+}
+.act.drag:active {
+  cursor: grabbing;
+}
+/* While a drag gesture is in flight, suppress text selection and the tap
+   highlight so the page doesn't fight the drag on touch devices. */
+body.dragging-active {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grabbing;
+}
+body.dragging-active * {
+  -webkit-touch-callout: none;
 }
 
 .row-check {
@@ -968,6 +984,77 @@ a {
   font-size: 12px;
   color: var(--text-3);
 }
+
+/* Weekly comeback card — extra reading making up for earlier slow days. */
+.comeback-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, var(--border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--orange) 14%, transparent),
+    transparent 70%
+  );
+}
+.comeback-card.ontrack {
+  border-color: color-mix(in srgb, var(--green) 50%, var(--border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--green) 16%, transparent),
+    transparent 70%
+  );
+}
+.comeback-ico {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--orange);
+}
+.comeback-card.ontrack .comeback-ico {
+  background: var(--green);
+}
+.comeback-ico svg {
+  width: 24px;
+  height: 24px;
+}
+.comeback-body {
+  min-width: 0;
+  flex: 1;
+}
+.comeback-head {
+  font-weight: 750;
+  font-size: 15px;
+}
+.comeback-detail {
+  font-size: 12.8px;
+  color: var(--text-2);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.comeback-meter {
+  margin-top: 9px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--card-2);
+  overflow: hidden;
+}
+.comeback-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--orange);
+  transition: width 0.4s ease;
+}
+.comeback-card.ontrack .comeback-meter i {
+  background: var(--green);
+}
 .section-card {
   padding: 18px;
   margin-top: 16px;
@@ -1094,6 +1181,14 @@ a {
   background: var(--green);
   color: #fff;
 }
+/* Over goal — a brighter green with a subtle ring, marking the strong days that
+   power weekly comebacks. */
+.cal-cell.exceeded {
+  background: var(--green);
+  color: #fff;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #fff 55%, var(--green));
+  filter: saturate(1.25) brightness(1.06);
+}
 .cal-cell.partial {
   background: var(--orange);
   color: #fff;
@@ -1130,6 +1225,11 @@ a {
 }
 .cal-legend .dot.green {
   background: var(--green);
+}
+.cal-legend .dot.exceeded {
+  background: var(--green);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #fff 55%, var(--green));
+  filter: saturate(1.25) brightness(1.06);
 }
 .cal-legend .dot.orange {
   background: var(--orange);
@@ -1253,8 +1353,20 @@ a {
   max-width: 540px;
   max-height: 86vh;
   overflow: auto;
+  /* Keep the modal's scroll from chaining into the page behind it. */
+  overscroll-behavior: contain;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4);
   animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* Background scroll lock while a modal is open: the page is frozen in place (JS
+   preserves the scroll offset via `top`) so the two scroll regions are fully
+   independent. */
+body.modal-locked {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100%;
+  overflow: hidden;
 }
 @keyframes pop {
   from {
@@ -1454,6 +1566,30 @@ a {
   color: var(--text-2);
   margin: 0 0 28px;
 }
+/* Login screen (optional basic auth) */
+.login-screen {
+  max-width: 420px;
+}
+.login-card {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.login-card .field {
+  margin-bottom: 8px;
+}
+.login-card .btn {
+  margin-top: 6px;
+  justify-content: center;
+}
+.login-error {
+  color: var(--red);
+  font-size: 13px;
+  min-height: 18px;
+  margin: 2px 0 4px;
+}
+
 .step {
   display: flex;
   gap: 14px;
@@ -1728,6 +1864,7 @@ pre.code {
 .ai-mini-body {
   padding: 14px 16px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   flex: 1;
   min-height: 0;
 }

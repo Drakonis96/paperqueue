@@ -73,6 +73,7 @@ iPhone/iPad app and the Mac app all stay in lock-step.
 | `ZOTERO_API_BASE` | `https://api.zotero.org`  | Override the Zotero API endpoint (proxies).             |
 | `DEMO_MODE`       | `0`                       | Force the demo library even with a key set.             |
 | `DATA_DIR`        | `/data` (Docker)          | Where user settings are persisted. Mount a volume here. |
+| `AUTH_ENABLED`    | `0` *(off)*               | Require a login (see [Optional login](#optional-login)).|
 
 ### Settings persistence (`/data`)
 
@@ -81,6 +82,40 @@ User settings — daily goal, custom queues, tags-on-read and AI favourites — 
 and shared across every browser/device that uses this instance. The compose
 files mount a named volume `paperqueue-data` at `/data` so they survive restarts
 and image updates. Queue/read **state** still lives in Zotero tags as before.
+
+### Optional login
+
+By default PaperQueue requires **no credentials** — there are **no default
+username or password configured**, and the app opens straight to your library.
+If you expose the instance beyond a trusted network you can switch on a simple
+shared login:
+
+```bash
+AUTH_ENABLED=1
+AUTH_USERNAME=admin        # default if unset
+AUTH_PASSWORD=paperqueue   # default if unset — change it!
+```
+
+When enabled the server gates the data API behind a session cookie and shows a
+sign-in screen; a **Sign out** action appears in **Settings → Account**. The
+built-in fallback credentials are `admin` / `paperqueue` — they only apply once
+you turn auth on, and you should override them. Login attempts are **rate-limited
+per IP** to blunt brute-force guessing.
+
+| Variable               | Default       | What it does                                              |
+| ---------------------- | ------------- | -------------------------------------------------------- |
+| `AUTH_ENABLED`         | `0`           | `1` to require a login. Off ⇒ no credentials asked.      |
+| `AUTH_USERNAME`        | `admin`       | The login username (used only when auth is on).          |
+| `AUTH_PASSWORD`        | `paperqueue`  | The login password (used only when auth is on).          |
+| `AUTH_MAX_ATTEMPTS`    | `5`           | Failed tries from one IP before it's locked out.         |
+| `AUTH_WINDOW_MINUTES`  | `15`          | Window the failures are counted within.                  |
+| `AUTH_BLOCK_MINUTES`   | `15`          | How long an IP stays locked out.                         |
+| `AUTH_SESSION_HOURS`   | `720`         | How long a session (cookie) stays valid (30 days).       |
+| `AUTH_COOKIE_SECURE`   | `0`           | Send the cookie only over HTTPS — set when behind TLS.   |
+
+> This is *basic* shared-password protection (one account, in-memory sessions),
+> meant for keeping a self-hosted instance private — not a multi-user system. It
+> doesn't replace putting the app behind your own reverse proxy / TLS.
 
 ### AI assistant (optional)
 
@@ -112,16 +147,27 @@ Every AI change is **confirmed before it happens and can be undone**.
 
 - **Reading queue(s)** — curated lists; mark read, skip, remove,
   drag-to-reorder, jump-to-position. Create and switch between multiple named
-  queues.
+  queues with a scrollable tab strip. **Searching the queue keeps each paper's
+  real position number** instead of renumbering the filtered results.
+- **Touch-friendly drag & drop** — reorder the queue and move a paper to another
+  queue (drop it on a queue tab) with the grip handle, on a mouse **or a
+  touchscreen** (Pointer Events, with edge auto-scroll for long lists).
 - **Postponed list** — a built-in list (alongside Default) where postponed
   papers wait until you put them back in a reading queue.
 - **Library** — your whole bibliography with search, sorting and rich filters
   (status, collection, author, tag, year). Queued papers show a green check.
 - **Collections** — browse collections and subcollections, add to the queue.
-- **History** — everything you've read, with real read dates; send papers back.
+- **History** — everything you've read, with real read dates. Sending a paper
+  back to its queue **restores its original position** rather than appending it.
 - **Stats** — daily goal ring, reading streaks, a month-grid calendar (with
-  month navigation and today highlighted), and per-week papers and pages charts.
+  month navigation, today highlighted and **over-goal days marked**), per-week
+  papers and pages charts, and a **weekly comeback** indicator: when extra
+  reading on a strong day makes up for an earlier day you fell short, it shows
+  how much you've clawed back and whether you're back on track for the week.
 - **Add by DOI** — fetches metadata from Crossref and adds it to Zotero.
+- **Optional login** — off by default (no credentials); enable a simple
+  rate-limited shared password to keep a self-hosted instance private. See
+  [Optional login](#optional-login).
 - **AI assistant** *(optional)* — suggests papers for your queue from context
   collections and reorders the queue by affinity, with OpenAI, OpenRouter,
   DeepSeek, Google Gemini or any OpenAI-compatible endpoint. Always confirmed,
@@ -154,6 +200,7 @@ web/
 │   ├── stream.js     # Zotero WebSocket → live "changed" events
 │   ├── crossref.js   # DOI → Zotero item
 │   ├── ai.js         # OpenAI-compatible AI proxy (keys stay server-side)
+│   ├── auth.js       # optional shared-password login + rate limiting
 │   └── demo.js       # in-memory sample library (no-key demo mode)
 ├── public/           # the browser app (vanilla JS, no build step)
 │   ├── index.html

@@ -522,10 +522,15 @@ export class Store {
 
   // -- Mutations -------------------------------------------------------------
 
-  desiredTags(base, { queued, read, skipped, pos, queueName }) {
+  // `keepMemory` keeps the pq:pos/pq:qname tags even when the paper is no longer
+  // queued (e.g. after marking it read or skipping it). They carry no meaning for
+  // a non-queued paper, but they let `reset()` later put it back exactly where it
+  // was in its queue instead of dumping it at the bottom. The memory rides along
+  // in Zotero tags, so the restored position syncs across devices too.
+  desiredTags(base, { queued, read, skipped, pos, queueName, keepMemory = false }) {
     let tags = base.filter((t) => !t.startsWith("pq:"));
-    if (queued) {
-      tags.push(Tags.queue);
+    if (queued) tags.push(Tags.queue);
+    if (queued || keepMemory) {
       if (pos != null) tags.push(Tags.posPrefix + String(Math.trunc(pos)));
       if (queueName) tags.push(Tags.qnamePrefix + queueName);
     }
@@ -535,6 +540,19 @@ export class Store {
     }
     if (skipped) tags.push(Tags.skip);
     return uniq(tags);
+  }
+
+  /** The queue slot (position + queue name) a paper currently holds or last held,
+   *  read from its in-memory state or, for a non-queued paper, from its retained
+   *  pq:pos/pq:qname memory tags. Returns { pos, queue } with pos possibly null. */
+  _rememberedSlot(paper) {
+    if (paper.isPending) {
+      return {
+        pos: paper.sortPriority < Infinity ? paper.sortPriority : null,
+        queue: paper.queueName,
+      };
+    }
+    return { pos: parsePos(paper.tags), queue: parseQueueName(paper.tags) };
   }
 
   _nextPosition(stored) {
@@ -547,9 +565,9 @@ export class Store {
     return max + Tags.posGap;
   }
 
-  async _applyState(paper, { queued, read, skipped, pos, queueName }) {
+  async _applyState(paper, { queued, read, skipped, pos, queueName, keepMemory = false }) {
     const tags = this.desiredTags(paper.tags, {
-      queued, read, skipped, pos, queueName,
+      queued, read, skipped, pos, queueName, keepMemory,
     });
     paper.tags = tags;
     this._saveCache();
@@ -589,28 +607,57 @@ export class Store {
   moveToQueue(paper, queue) {
     this.addToQueue(paper, queue);
   }
+  /** Adds (or re-adds) a paper to a queue at a specific position, instead of
+   *  appending it. Used to restore a paper to the slot it held before it was
+   *  read/skipped. Positions are gapped, so reusing an old value lands the paper
+   *  back among its original neighbours. */
+  addToQueueAt(paper, queue, pos) {
+    const stored = this.storedName(queue);
+    paper.readStatus = "unread";
+    paper.queueStatus = "pending";
+    paper.queueName = stored;
+    paper.readDate = null;
+    paper.isPending = true;
+    paper.sortPriority = pos;
+    this._applyState(paper, {
+      queued: true, read: false, skipped: false, pos, queueName: stored,
+    });
+  }
   markRead(paper) {
+    // Remember where it sat so History → "back to queue" can restore the slot.
+    const slot = this._rememberedSlot(paper);
     paper.readStatus = "read";
     paper.queueStatus = "read";
     paper.queueName = null;
     paper.readDate = new Date();
     paper.isPending = false;
     this._applyState(paper, {
-      queued: false, read: true, skipped: false, pos: null, queueName: null,
+      queued: false, read: true, skipped: false,
+      pos: slot.pos, queueName: slot.queue, keepMemory: true,
     });
   }
   skip(paper) {
+    const slot = this._rememberedSlot(paper);
     paper.readStatus = "skipped";
     paper.queueStatus = "skipped";
     paper.queueName = null;
     paper.readDate = null;
     paper.isPending = false;
     this._applyState(paper, {
-      queued: false, read: false, skipped: true, pos: null, queueName: null,
+      queued: false, read: false, skipped: true,
+      pos: slot.pos, queueName: slot.queue, keepMemory: true,
     });
   }
+  /** Sends a read/skipped paper back to its queue. Restores its remembered queue
+   *  and position when known, otherwise appends to the Default queue. */
   reset(paper) {
-    this.addToQueue(paper);
+    const slot = this._rememberedSlot(paper);
+    const queue = slot.queue || DEFAULT_QUEUE;
+    if (slot.pos != null && this.availableQueues.includes(queue)) {
+      this.addToQueueAt(paper, queue, slot.pos);
+    } else {
+      this.addToQueue(paper, queue);
+    }
   }
   removeFromQueue(paper) {
     this._clear(paper);

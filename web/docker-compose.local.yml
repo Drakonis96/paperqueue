@@ -21,6 +21,11 @@ services:
       ZOTERO_API_KEY: ${ZOTERO_API_KEY:-}
       PORT: "5954"
       DATA_DIR: /data
+      # Optional basic auth — OFF by default. Set AUTH_ENABLED=1 + your own
+      # user/pass to require a login (defaults: admin / paperqueue).
+      AUTH_ENABLED: ${AUTH_ENABLED:-}
+      AUTH_USERNAME: ${AUTH_USERNAME:-}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
       # AI assistant (optional) — keys stay on the server, never sent to browsers.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

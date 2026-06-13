@@ -49,6 +49,18 @@ try {
 
 const apiKey = (process.env.ZOTERO_API_KEY || "").trim();
 
+/// Parses a boolean-ish env var ("1"/"true"/"yes"/"on" → true).
+function envFlag(name) {
+  const v = (process.env[name] || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/// Parses a positive number env var, falling back to `def`.
+function envNum(name, def) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : def;
+}
+
 export const config = {
   /// App version (matches the native iOS/macOS build).
   version: pkgVersion,
@@ -85,6 +97,29 @@ export const config = {
   dataDir:
     (process.env.DATA_DIR || "").trim() ||
     path.resolve(__dirname, "..", "data"),
+
+  /// Optional basic local authentication. DISABLED by default — out of the box
+  /// PaperQueue asks for no credentials at all. Set AUTH_ENABLED=1 to require a
+  /// login. The default user/pass below (admin / paperqueue) are only a fallback
+  /// used when you enable auth without setting AUTH_USERNAME / AUTH_PASSWORD —
+  /// change them. Login attempts are rate-limited (see maxAttempts/block).
+  auth: {
+    enabled: envFlag("AUTH_ENABLED"),
+    username: (process.env.AUTH_USERNAME || "admin").trim() || "admin",
+    password: process.env.AUTH_PASSWORD || "paperqueue",
+    /// Failed attempts from one IP allowed within `windowMinutes` before the IP
+    /// is locked out for `blockMinutes`.
+    maxAttempts: envNum("AUTH_MAX_ATTEMPTS", 5),
+    windowMinutes: envNum("AUTH_WINDOW_MINUTES", 15),
+    blockMinutes: envNum("AUTH_BLOCK_MINUTES", 15),
+    /// How long a login session (cookie) stays valid. Default 30 days.
+    sessionHours: envNum("AUTH_SESSION_HOURS", 720),
+    /// Send the session cookie only over HTTPS. Enable when serving behind TLS.
+    cookieSecure: envFlag("AUTH_COOKIE_SECURE"),
+    /// Trust X-Forwarded-For for the client IP (set when behind a reverse proxy
+    /// so rate-limiting keys on the real client, not the proxy). On by default.
+    trustProxy: process.env.AUTH_TRUST_PROXY === undefined ? true : envFlag("AUTH_TRUST_PROXY"),
+  },
 
   /// AI assistant providers. Keys live ONLY here (server-side) — they are never
   /// returned to the browser and never logged. Leave a key empty to disable that

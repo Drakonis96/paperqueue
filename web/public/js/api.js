@@ -15,8 +15,15 @@ async function request(path, options = {}) {
     body = null;
   }
   if (!res.ok) {
+    // A protected instance whose session has expired (or was never established):
+    // bounce to the login screen by reloading once.
+    if (res.status === 401 && body?.authRequired && !window.__pqAuthBounced) {
+      window.__pqAuthBounced = true;
+      location.reload();
+    }
     const err = new Error(body?.error || `Request failed (${res.status})`);
     err.status = res.status;
+    err.body = body;
     throw err;
   }
   return body;
@@ -24,6 +31,15 @@ async function request(path, options = {}) {
 
 export const api = {
   config: () => request("/api/config"),
+
+  // -- Auth (optional, off unless AUTH_ENABLED on the server) -----------------
+  authStatus: () => request("/api/auth"),
+  login: (username, password) =>
+    request("/api/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: () => request("/api/logout", { method: "POST" }),
 
   library: (since, force = false) => {
     const params = new URLSearchParams();

@@ -26,9 +26,12 @@ so a queue you build in one shows up in the others:
 ## Features
 
 - **Reading queues** — curated lists of papers you actually intend to read.
-  Swipe to mark read, postpone, skip, or remove. Drag to reorder. Create
-  **multiple named queues** (e.g. *To read*, *Teaching*, *Reviews*) and switch
-  between them; the Add button targets the **Default** queue unless you pick one.
+  Swipe to mark read, postpone, skip, or remove. Drag to reorder (on the web,
+  with **touch support** for phones/tablets). Create **multiple named queues**
+  (e.g. *To read*, *Teaching*, *Reviews*) and switch between them; the Add button
+  targets the **Default** queue unless you pick one. Searching a queue keeps each
+  paper's real position number, and sending a read paper back from History
+  restores its original slot.
 - **Library** — browse your **whole bibliography** (books, chapters, theses,
   reports, conference papers — every Zotero item type, not just journal
   articles), with **search**, **sorting** (recently added, title, author or
@@ -41,7 +44,9 @@ so a queue you build in one shows up in the others:
 - **Live sync progress** — a progress bar while your library is fetched.
 - **Add by DOI** — fetches metadata from Crossref and adds the paper to Zotero.
 - **History** — everything you've read, with real read dates.
-- **Stats** — reading streak, papers read per week, totals.
+- **Stats** — reading streak, papers read per week, totals, a month calendar
+  (over-goal days marked), and a **weekly comeback** indicator that shows when a
+  strong day has made up for an earlier day you fell short of your goal.
 - **Widget** — pending count and the next paper, one tap to open.
 - **Offline-first** — a local SwiftData cache + an outbox that syncs tag
   changes back to Zotero when you're online.
@@ -91,6 +96,11 @@ cd web
 echo "ZOTERO_API_KEY=your_key_here" > .env   # or leave blank for a demo library
 docker compose up -d                          # → http://localhost:5954
 ```
+
+The web edition ships with **no login and no default credentials** — it opens
+straight to your library. If you expose it beyond a trusted network you can turn
+on an optional, rate-limited shared password (`AUTH_ENABLED=1`); see
+[`web/README.md`](web/README.md#optional-login).
 
 Full instructions and configuration in [`web/README.md`](web/README.md).
 
