@@ -1709,7 +1709,39 @@ pre.code {
   margin-bottom: 6px;
 }
 
-/* Exclude-by-tag picker (Suggest with AI). */
+/* Keyboard shortcuts help. */
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 2px;
+}
+.shortcut-row span {
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+.shortcut-row kbd {
+  flex: none;
+  min-width: 58px;
+  text-align: center;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 7px;
+  padding: 4px 8px;
+}
+
+/* Tag filter pickers (Suggest with AI): include + exclude. */
+.ai-include,
 .ai-exclude {
   margin-top: 16px;
   border-top: 1px solid var(--border);
@@ -1738,6 +1770,12 @@ pre.code {
 .ai-xtag.sel {
   background: var(--accent);
   border-color: var(--accent);
+  color: #fff;
+}
+/* Include chips select green so they read as "keep" vs the accent "drop". */
+.ai-xtag.inc.sel {
+  background: var(--green);
+  border-color: var(--green);
   color: #fff;
 }
 

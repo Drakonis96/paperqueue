@@ -71,3 +71,26 @@ test("listModels normalizes, dedupes and sorts Gemini models", async () => {
 test("listModels rejects an unconfigured provider", async () => {
   await assert.rejects(() => ai.listModels("openai"), /isn't configured/);
 });
+
+test("responseFormatFor uses strict json_schema for schema-capable providers", () => {
+  const schema = { name: "queue_order", schema: { type: "object", properties: {}, required: [], additionalProperties: false } };
+  for (const p of ["openai", "openrouter", "gemini"]) {
+    const rf = ai.responseFormatFor(p, schema);
+    assert.equal(rf.type, "json_schema");
+    assert.equal(rf.json_schema.name, "queue_order");
+    assert.equal(rf.json_schema.strict, true);
+    assert.equal(rf.json_schema.schema, schema.schema);
+  }
+});
+
+test("responseFormatFor falls back to json_object for DeepSeek and custom", () => {
+  const schema = { name: "x", schema: { type: "object" } };
+  for (const p of ["deepseek", "custom"]) {
+    assert.deepEqual(ai.responseFormatFor(p, schema), { type: "json_object" });
+  }
+});
+
+test("responseFormatFor returns null when no schema is requested", () => {
+  assert.equal(ai.responseFormatFor("openai", null), null);
+  assert.equal(ai.responseFormatFor("openai", {}), null);
+});

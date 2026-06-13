@@ -41,6 +41,53 @@ export function filterExcluded(items, excludedTags) {
   return items.filter((it) => !hasExcludedTag(it.tags, set));
 }
 
+/** Keeps only candidate items that carry at least one of the include tags. An
+ *  empty include list means "no restriction" (keep everything). */
+export function filterIncluded(items, includeTags) {
+  const set = excludedTagSet(includeTags); // same lower-casing/dedupe
+  if (!set.size) return items.slice();
+  return items.filter((it) =>
+    (it.tags || []).some((t) => set.has(String(t).toLowerCase()))
+  );
+}
+
+// JSON Schemas for structured outputs. Roots are objects with every property
+// required and additionalProperties:false, so they satisfy OpenAI's strict
+// Structured Outputs (and map cleanly to json_object mode for the rest).
+export const ORDER_SCHEMA = {
+  name: "queue_order",
+  schema: {
+    type: "object",
+    properties: { order: { type: "array", items: { type: "string" } } },
+    required: ["order"],
+    additionalProperties: false,
+  },
+};
+
+export const SUGGEST_SCHEMA = {
+  name: "queue_suggestions",
+  schema: {
+    type: "object",
+    properties: {
+      suggestions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            title: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["key", "title", "reason"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["suggestions"],
+    additionalProperties: false,
+  },
+};
+
 /** Compact one-line description of an item's user tags, or "" if none. */
 function tagSuffix(tags) {
   const t = userTags(tags);
@@ -69,10 +116,10 @@ export function buildReorderMessages({ label, papers }) {
         `You are PaperQueue's reading assistant. The user wants to reorder their ${label}.\n\n` +
         `${PQ_TAG_LEGEND}\n\n` +
         `Current queue (each line is: number. [key] title — authors (year) · tags):\n${listText}\n\n` +
-        `Return ONLY a JSON array containing EXACTLY the keys above in the new reading order. ` +
         `Group related papers together by topic (use the tags), method, author lineage, and chronology. ` +
-        `Do not add, remove, or invent keys. Output must be valid JSON inside a markdown code block, like:\n\n` +
-        "```json\n[\"KEY1\", \"KEY2\", \"KEY3\"]\n```",
+        `Do not add, remove, or invent keys. ` +
+        `Return ONLY a JSON object whose "order" array contains EXACTLY the keys above in the new reading order, like:\n` +
+        `{"order": ["KEY1", "KEY2", "KEY3"]}`,
     },
     { role: "user", content: `Order my ${label} so related papers sit together.` },
   ];
@@ -83,9 +130,9 @@ export function buildReorderMessages({ label, papers }) {
  * tags; the current queue is summarised (titles + tags) so the model suggests
  * complementary papers. Excluded tags are stated for transparency even though
  * the caller also hard-filters candidates that carry them.
- * @param {{count:number, candidates:{key:string,title:string,authors:string,year:string,tags:string[]}[], queueContext?:{title:string,tags:string[]}[], excludedTags?:string[]}} opts
+ * @param {{count:number, candidates:{key:string,title:string,authors:string,year:string,tags:string[]}[], queueContext?:{title:string,tags:string[]}[], excludedTags?:string[], includedTags?:string[]}} opts
  */
-export function buildSuggestMessages({ count, candidates, queueContext = [], excludedTags = [] }) {
+export function buildSuggestMessages({ count, candidates, queueContext = [], excludedTags = [], includedTags = [] }) {
   const candidateText = candidates
     .map(
       (it) =>
@@ -101,6 +148,9 @@ export function buildSuggestMessages({ count, candidates, queueContext = [], exc
         .join("\n")
     : "(the queue is currently empty)";
 
+  const includeLine = includedTags.length
+    ? `\n\nThe user only wants papers related to these tags — every suggestion should relate to at least one of them: ${includedTags.join(", ")}.`
+    : "";
   const excludeLine = excludedTags.length
     ? `\n\nThe user does NOT want papers about these tags — never suggest an item carrying any of them: ${excludedTags.join(", ")}.`
     : "";
@@ -111,13 +161,12 @@ export function buildSuggestMessages({ count, candidates, queueContext = [], exc
       content:
         `You are PaperQueue's reading assistant. Suggest up to ${count} papers from the Candidate items below to add to the user's reading queue. ` +
         `Choose items that complement what's already queued (similar or adjacent topics, methods, authors).\n\n` +
-        `${PQ_TAG_LEGEND}${excludeLine}\n\n` +
+        `${PQ_TAG_LEGEND}${includeLine}${excludeLine}\n\n` +
         `Current reading queue (for context — titles and the user's tags):\n${queueText}\n\n` +
         `Candidate items (each line is: - [key] title — authors (year) · tags):\n${candidateText}\n\n` +
-        `Return ONLY a JSON array of objects with keys \`key\`, \`title\`, and \`reason\`. ` +
-        `Every \`key\` must come from the Candidate items. Do not include items already in the queue. ` +
-        `Output must be valid JSON inside a markdown code block, like:\n\n` +
-        "```json\n[\n  {\"key\": \"KEY1\", \"title\": \"Title 1\", \"reason\": \"Short reason\"}\n]\n```",
+        `Every "key" must come from the Candidate items. Do not include items already in the queue. ` +
+        `Return ONLY a JSON object with a "suggestions" array of objects, each with "key", "title" and "reason", like:\n` +
+        `{"suggestions": [{"key": "KEY1", "title": "Title 1", "reason": "Short reason"}]}`,
     },
     { role: "user", content: "Recommend papers to add to my reading queue." },
   ];

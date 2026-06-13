@@ -72,6 +72,36 @@ export function normalizeModelId(providerId, id) {
   return s;
 }
 
+// Providers whose OpenAI-compatible API supports strict JSON-Schema Structured
+// Outputs. OpenAI and OpenRouter take `response_format.json_schema` directly;
+// Gemini's OpenAI-compat layer accepts the same shape (it's what the documented
+// Zod helper emits). DeepSeek supports only `json_object`, and custom endpoints
+// vary, so they fall back to `json_object` (the broadly-supported JSON mode).
+const JSON_SCHEMA_PROVIDERS = new Set(["openai", "openrouter", "gemini"]);
+
+/**
+ * Builds the provider-appropriate `response_format` for a desired JSON schema,
+ * or null when no schema was requested. `responseSchema` is `{ name, schema }`
+ * where `schema` is a JSON Schema whose root is an object.
+ */
+export function responseFormatFor(providerId, responseSchema) {
+  if (!responseSchema || !responseSchema.schema) return null;
+  if (JSON_SCHEMA_PROVIDERS.has(providerId)) {
+    return {
+      type: "json_schema",
+      json_schema: {
+        name: responseSchema.name || "response",
+        strict: true,
+        schema: responseSchema.schema,
+      },
+    };
+  }
+  // DeepSeek's JSON mode (and most custom endpoints) only understand json_object;
+  // the prompt already includes the word "json" and an example, as DeepSeek
+  // requires, so the schema is enforced through the prompt instead.
+  return { type: "json_object" };
+}
+
 /** A provider is usable only when it has a key (and, for custom, a base URL). */
 function isConfigured(spec) {
   return !!(spec && spec.apiKey && spec.base);
@@ -157,16 +187,21 @@ export async function streamChat(providerId, body, res, signal) {
     throw new AiError(400, "Request needs { model, messages }.");
   }
 
-  // DeepSeek V4 models (and the legacy reasoner alias) default to thinking
-  // mode, which rejects a forced tool_choice. Disable thinking when we were
-  // going to force a specific function, and let the caller decide whether to
-  // require a tool call.
+  // `responseSchema` is a PaperQueue concept, not an upstream field — pull it out
+  // and translate it into the provider's concrete response_format.
+  const { responseSchema, ...payloadBody } = body;
+  let payload = payloadBody;
+  const responseFormat = responseFormatFor(providerId, responseSchema);
+  if (responseFormat) payload = { ...payload, response_format: responseFormat };
+
+  // DeepSeek V4 models (and the legacy reasoner alias) default to thinking mode,
+  // which rejects both a forced tool_choice and JSON mode. Disable thinking when
+  // we use either, and let the caller decide whether to require a tool call.
   if (
     providerId === "deepseek" &&
-    body.tool_choice &&
-    typeof body.tool_choice === "object"
+    ((payload.tool_choice && typeof payload.tool_choice === "object") || responseFormat)
   ) {
-    body = { ...body, thinking: { type: "disabled" } };
+    payload = { ...payload, thinking: { type: "disabled" } };
   }
 
   let upstream;
@@ -174,7 +209,7 @@ export async function streamChat(providerId, body, res, signal) {
     upstream = await fetch(`${spec.base}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(spec) },
-      body: JSON.stringify({ ...body, stream: true }),
+      body: JSON.stringify({ ...payload, stream: true }),
       signal,
     });
   } catch (err) {

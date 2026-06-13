@@ -8,8 +8,11 @@ import {
   excludedTagSet,
   hasExcludedTag,
   filterExcluded,
+  filterIncluded,
   buildReorderMessages,
   buildSuggestMessages,
+  ORDER_SCHEMA,
+  SUGGEST_SCHEMA,
 } from "../public/js/ai-prompt.js";
 
 test("userTags drops PaperQueue pq: state tags, keeps topic tags", () => {
@@ -47,6 +50,35 @@ test("filterExcluded removes items carrying an excluded tag", () => {
   assert.notEqual(all, items);
 });
 
+test("filterIncluded keeps only items carrying an included tag", () => {
+  const items = [
+    { key: "A", tags: ["nlp"] },
+    { key: "B", tags: ["vision"] },
+    { key: "C", tags: ["nlp", "graphs"] },
+    { key: "D", tags: [] },
+  ];
+  const kept = filterIncluded(items, ["NLP"]);
+  assert.deepEqual(kept.map((i) => i.key), ["A", "C"]);
+  // Empty include list = no restriction (everything, as a copy).
+  const all = filterIncluded(items, []);
+  assert.equal(all.length, items.length);
+  assert.notEqual(all, items);
+});
+
+test("ORDER_SCHEMA and SUGGEST_SCHEMA are strict-compatible object roots", () => {
+  for (const s of [ORDER_SCHEMA, SUGGEST_SCHEMA]) {
+    assert.equal(typeof s.name, "string");
+    assert.equal(s.schema.type, "object");
+    assert.equal(s.schema.additionalProperties, false);
+    assert.ok(Array.isArray(s.schema.required) && s.schema.required.length);
+  }
+  assert.deepEqual(SUGGEST_SCHEMA.schema.properties.suggestions.items.required, [
+    "key",
+    "title",
+    "reason",
+  ]);
+});
+
 test("PQ_TAG_LEGEND explains every pq: state tag", () => {
   for (const t of ["pq:queue", "pq:qname:", "pq:pos:", "pq:read:", "pq:skip"]) {
     assert.ok(PQ_TAG_LEGEND.includes(t), `legend should mention ${t}`);
@@ -68,6 +100,7 @@ test("buildReorderMessages embeds keys, tags and the legend", () => {
   assert.ok(sys.includes("tags: nlp")); // pq:queue is filtered out of the topic list
   assert.ok(!sys.includes("tags: nlp, pq:queue"));
   assert.ok(sys.includes(PQ_TAG_LEGEND));
+  assert.ok(sys.includes('{"order":')); // object-wrapped output example (works with JSON mode)
   assert.equal(msgs[1].role, "user");
 });
 
@@ -86,6 +119,18 @@ test("buildSuggestMessages includes count, candidates, queue context and exclusi
   assert.ok(sys.includes("In Queue"));
   assert.ok(sys.includes("surveys")); // exclusion is stated to the model
   assert.ok(sys.includes(PQ_TAG_LEGEND));
+  assert.ok(sys.includes('{"suggestions":')); // object-wrapped output example
+});
+
+test("buildSuggestMessages states an include constraint when given one", () => {
+  const msgs = buildSuggestMessages({
+    count: 4,
+    candidates: [{ key: "C1", title: "T", authors: "A", year: "2020", tags: ["nlp"] }],
+    includedTags: ["nlp", "graphs"],
+  });
+  const sys = msgs[0].content;
+  assert.ok(/only wants papers related to these tags/i.test(sys));
+  assert.ok(sys.includes("nlp, graphs"));
 });
 
 test("buildSuggestMessages omits the exclusion line when there are none", () => {

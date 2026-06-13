@@ -61,11 +61,11 @@ export const api = {
    *   { type: "error", error }                  — a mid-stream error frame
    * Pass `signal` (AbortSignal) to support a Stop button.
    */
-  async aiChat({ provider, model, messages, tools, tool_choice, temperature, signal }, onEvent) {
+  async aiChat({ provider, model, messages, tools, tool_choice, temperature, responseSchema, signal }, onEvent) {
     const res = await fetch("/api/ai/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, model, messages, tools, tool_choice, temperature }),
+      body: JSON.stringify({ provider, model, messages, tools, tool_choice, temperature, responseSchema }),
       signal,
     });
     if (!res.ok || !res.body) {

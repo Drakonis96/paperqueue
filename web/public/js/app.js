@@ -889,6 +889,7 @@ function settingsView() {
       <div class="settings-row" style="margin-top:8px">
         <div style="color:var(--text-3)">${I("info", 18)}</div>
         <div class="grow" style="font-size:12.5px;color:var(--text-3)">PaperQueue Web v${esc(store.config.version || "1.0")}</div>
+        <button class="btn sm" data-act="shortcuts">Keyboard shortcuts</button>
       </div>
     </div>`;
 
@@ -1403,12 +1404,72 @@ document.addEventListener("change", (e) => {
   }
 });
 
+function isTypingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+function shortcutsModal() {
+  const rows = [
+    ["1 – 5", "Jump to a tab (Queue · Library · History · Stats · Settings)"],
+    ["/", "Focus the search box on this tab"],
+    ["r", "Sync with Zotero now"],
+    ["?", "Show this help"],
+    ["Esc", "Close a dialog"],
+  ];
+  openModal(
+    modalShell(
+      "Keyboard shortcuts",
+      `<div class="shortcuts">${rows
+        .map(([k, d]) => `<div class="shortcut-row"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`)
+        .join("")}</div>`,
+      `<button class="btn primary" data-act="closeModal">Done</button>`
+    )
+  );
+}
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeModal();
   if (e.key === "Enter") {
     if ($("#queue-name") && document.activeElement === $("#queue-name")) createQueueFromModal();
     if ($("#doi-input") && document.activeElement === $("#doi-input")) submitDOI();
     if ($("#move-pos") && document.activeElement === $("#move-pos")) submitMovePos();
+  }
+
+  // Escape closes the topmost dialog, otherwise blurs a focused field.
+  if (e.key === "Escape") {
+    const aiBack = $(".ai-mini-backdrop");
+    if (aiBack) aiBack.remove();
+    else if ($(".modal-backdrop")) closeModal();
+    else if (isTypingTarget(document.activeElement)) document.activeElement.blur();
+    return;
+  }
+
+  // Global shortcuts: skip when typing, when a dialog is open, on the setup
+  // screen, or alongside a system modifier (so we never hijack Cmd/Ctrl combos).
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (isTypingTarget(document.activeElement)) return;
+  if ($(".modal-backdrop") || $(".ai-mini-backdrop")) return;
+  if (!store.config.connected) return;
+
+  switch (e.key) {
+    case "1": handleAction("nav:queue"); break;
+    case "2": handleAction("nav:library"); break;
+    case "3": handleAction("nav:history"); break;
+    case "4": handleAction("nav:stats"); break;
+    case "5": handleAction("nav:settings"); break;
+    case "/": {
+      const s = $(".content .search input") || $(".search input");
+      if (s) {
+        e.preventDefault();
+        s.focus();
+        s.select?.();
+      }
+      break;
+    }
+    case "r": store.syncLibrary(); break;
+    case "?": shortcutsModal(); break;
+    default: return;
   }
 });
 
@@ -1474,6 +1535,8 @@ function handleAction(act, target) {
     case "sync":
       store.syncLibrary();
       return;
+    case "shortcuts":
+      return shortcutsModal();
     case "closeModal":
       return closeModal();
 

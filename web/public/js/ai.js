@@ -10,7 +10,14 @@
 // The browser never holds a provider key — every call goes through the server.
 
 import { authorLine, DEFAULT_QUEUE } from "./store.js";
-import { buildReorderMessages, buildSuggestMessages, filterExcluded } from "./ai-prompt.js";
+import {
+  buildReorderMessages,
+  buildSuggestMessages,
+  filterExcluded,
+  filterIncluded,
+  ORDER_SCHEMA,
+  SUGGEST_SCHEMA,
+} from "./ai-prompt.js";
 
 const SVG = {
   spark:
@@ -100,7 +107,7 @@ function currentModelFrom(root, id = "ai-model-select") {
 // Generic non-streaming AI call
 // ---------------------------------------------------------------------------
 
-async function askAi(messages, { sel = currentModel(), temperature = 0.2, timeoutMs = 300000 } = {}) {
+async function askAi(messages, { sel = currentModel(), temperature = 0.2, timeoutMs = 300000, responseSchema = null } = {}) {
   if (!sel) throw new Error("Pick a model in Settings → AI assistant.");
   const abort = new AbortController();
   // Cap the wait so a stuck request can't hang forever, but keep it generous —
@@ -118,6 +125,7 @@ async function askAi(messages, { sel = currentModel(), temperature = 0.2, timeou
         model: sel.model,
         messages,
         temperature,
+        responseSchema,
         signal: abort.signal,
       },
       (ev) => {
@@ -412,7 +420,7 @@ export async function orderQueue() {
   const done = busyModal("Ordering queue", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`, { showElapsed: true });
   let raw = "";
   try {
-    raw = await askAi(messages, { sel });
+    raw = await askAi(messages, { sel, responseSchema: ORDER_SCHEMA });
   } catch (err) {
     done();
     toast(err.message || "Couldn't order queue", "error");
@@ -420,7 +428,9 @@ export async function orderQueue() {
   }
   done();
 
-  const order = extractJson(raw);
+  // Structured outputs return { order: [...] }; tolerate a bare array too.
+  const parsed = extractJson(raw);
+  const order = Array.isArray(parsed) ? parsed : parsed?.order;
   if (!Array.isArray(order) || order.length !== pending.length || !order.every((k) => pending.some((p) => p.key === k))) {
     openPreviewModal(
       "Reorder failed",
@@ -481,21 +491,27 @@ export async function addSuggestions() {
     ? renderCollectionTree(roots, 0, selected)
     : `<div class="ai-muted">No collections in this library.</div>`;
 
-  // Optional tag exclusions: any candidate carrying one of these tags is dropped
-  // before it ever reaches the model. Always shown (with an empty state) so the
-  // filter is discoverable; the collections list above is height-bounded so this
-  // section stays visible without scrolling past a long collection tree.
+  // Optional tag filters: include = only candidates carrying a selected tag;
+  // exclude = drop candidates carrying a selected tag (exclude wins). Both are
+  // always shown (with an empty state) so they're discoverable, and the
+  // collections list above is height-bounded so they stay visible.
   const tags = store.libraryTags();
+  const chipCloud = (kind, attrName) =>
+    tags.length
+      ? `<div class="ai-xtags">${tags
+          .map((t) => `<button type="button" class="ai-xtag ${kind}" ${attrName}="${esc(t)}">${esc(t)}</button>`)
+          .join("")}</div>`
+      : `<div class="ai-muted">No tags in your library yet.</div>`;
+
+  const includeSection = `<div class="ai-include">
+         <label class="ai-field-label">Only papers tagged (optional)</label>
+         <div class="ai-muted" style="margin:2px 0 8px">Tap tags to suggest only papers carrying at least one of them.</div>
+         ${chipCloud("inc", "data-itag")}
+       </div>`;
   const excludeSection = `<div class="ai-exclude">
          <label class="ai-field-label">Exclude papers tagged (optional)</label>
          <div class="ai-muted" style="margin:2px 0 8px">Tap tags to drop any suggestion that carries them.</div>
-         ${
-           tags.length
-             ? `<div class="ai-xtags">${tags
-                 .map((t) => `<button type="button" class="ai-xtag" data-xtag="${esc(t)}">${esc(t)}</button>`)
-                 .join("")}</div>`
-             : `<div class="ai-muted">No tags in your library yet.</div>`
-         }
+         ${chipCloud("exc", "data-xtag")}
        </div>`;
 
   const modal = openPickerModal(
@@ -507,6 +523,7 @@ export async function addSuggestions() {
      </div>
      <label class="ai-field-label">Collections</label>
      <div class="ai-pick-list" style="max-height:210px;overflow-y:auto">${tree}</div>
+     ${includeSection}
      ${excludeSection}`,
     async (root) => {
       const picked = [...root.querySelectorAll('.ai-pick-list input[type="checkbox"]:checked')].map((cb) => ({
@@ -520,20 +537,21 @@ export async function addSuggestions() {
       const sel = currentModelFrom(root);
       const countInput = root.querySelector("[data-ai-count]");
       const count = Math.max(1, Math.min(50, parseInt(countInput?.value || "5", 10)));
-      const excludedTags = [...root.querySelectorAll(".ai-xtag.sel")].map((b) => b.dataset.xtag);
-      await runSuggestions(sel, picked, count, excludedTags);
+      const includedTags = [...root.querySelectorAll(".ai-include .ai-xtag.sel")].map((b) => b.dataset.itag);
+      const excludedTags = [...root.querySelectorAll(".ai-exclude .ai-xtag.sel")].map((b) => b.dataset.xtag);
+      await runSuggestions(sel, picked, count, excludedTags, includedTags);
       return true;
     }
   );
 
-  // Toggle exclusion chips (the picker's own click handler ignores them).
+  // Toggle filter chips (the picker's own click handler ignores them).
   modal.addEventListener("click", (e) => {
     const chip = e.target.closest(".ai-xtag");
     if (chip) chip.classList.toggle("sel");
   });
 }
 
-async function runSuggestions(sel, pickedCollections, count, excludedTags = []) {
+async function runSuggestions(sel, pickedCollections, count, excludedTags = [], includedTags = []) {
   let close = busyModal("Suggesting papers", "Reading the selected collections…");
 
   // Fetch every picked collection concurrently, then dedupe.
@@ -563,14 +581,16 @@ async function runSuggestions(sel, pickedCollections, count, excludedTags = []) 
     }
   }
 
-  // Honour the user's tag exclusions before anything is sent to the model.
+  // Apply the user's tag filters before anything is sent to the model: keep only
+  // papers carrying an included tag (if any), then drop excluded ones.
+  contextItems = filterIncluded(contextItems, includedTags);
   contextItems = filterExcluded(contextItems, excludedTags).slice(0, MAX_CONTEXT_ITEMS);
 
   if (!contextItems.length) {
     close();
     toast(
-      excludedTags.length
-        ? "No papers left after applying your tag exclusions"
+      includedTags.length || excludedTags.length
+        ? "No papers left after applying your tag filters"
         : "No new papers found in the selected collections",
       "error"
     );
@@ -583,14 +603,14 @@ async function runSuggestions(sel, pickedCollections, count, excludedTags = []) 
     .slice(0, 40)
     .map((p) => ({ title: p.title, tags: p.tags }));
 
-  const messages = buildSuggestMessages({ count, candidates: contextItems, queueContext, excludedTags });
+  const messages = buildSuggestMessages({ count, candidates: contextItems, queueContext, excludedTags, includedTags });
 
   // Swap the spinner message now that we're actually asking the model.
   close();
   close = busyModal("Suggesting papers", `Asking ${providerLabel(sel.provider)} · ${sel.model}…`, { showElapsed: true });
   let raw = "";
   try {
-    raw = await askAi(messages, { sel });
+    raw = await askAi(messages, { sel, responseSchema: SUGGEST_SCHEMA });
   } catch (err) {
     close();
     toast(err.message || "Couldn't get suggestions", "error");
@@ -598,7 +618,9 @@ async function runSuggestions(sel, pickedCollections, count, excludedTags = []) 
   }
   close();
 
-  const parsed = extractJson(raw);
+  // Structured outputs return { suggestions: [...] }; tolerate a bare array too.
+  const parsedRaw = extractJson(raw);
+  const parsed = Array.isArray(parsedRaw) ? parsedRaw : parsedRaw?.suggestions;
   if (!Array.isArray(parsed) || !parsed.length) {
     openPreviewModal(
       "Suggestions failed",
